@@ -5,13 +5,16 @@ Team **YamineLamal** submission for **More than a Hack 2027, Phase 1: Ball Posse
 
 For every frame of FC Barcelona vs Athletic Club, the pipeline outputs `H`, `A` or `D`. It uses
 a three-state hidden Markov model whose emission tables are learned by **unsupervised EM on the
-whole match**. No ground truth is read at any point, and no constant is tied to a frame of the
+whole match**, run on **two-camera fused tracking**: the broadcast recording is aligned to the
+tactical timeline automatically, shot by shot, and fills in the ball where the tactical tracker
+lost it. No ground truth is read at any point, and no constant is tied to a frame of the
 game. The approach is described in [`docs/TECHNICAL_REPORT.md`](docs/TECHNICAL_REPORT.md).
 
 ```
-tracking ─┐
-tagging  ─┼─> 9 categorical features ─> tempered EM (no labels) ─> Viterbi per half ─> H/A/D
-homography┘        per frame              + self-consistent evidence scale
+tactical tracking ──────────────┐
+broadcast tracking ─> align ─> fill ball ─┤
+Smart Tagging ──────────────────┼─> 9 features ─> tempered EM (no labels) ─> Viterbi ─> H/A/D
+tactical homography ────────────┘                 + self-consistent evidence scale
 ```
 
 ## Reproduce the submission
@@ -24,20 +27,23 @@ pip install -r requirements.txt
 ```
 
 Unpack the match data into `data/` with the names it ships with (see [`data/README.md`](data/README.md)).
-The pipeline reads only these three tactical files, plus the optional homography:
+The submission was generated from these seven files. No video is needed:
 
 ```
 data/tactical/BAR-ATH_tactical_atd.xml
 data/tactical/BAR-ATH_tactical_atd.txt
 data/tactical/BAR-ATH_tactical_smart_tagging.xml
-data/tactical/BAR-ATH_tactical_homography.csv     (optional, used by default)
+data/tactical/BAR-ATH_tactical_homography.csv
+data/broadcast/BAR-ATH_broadcast_atd.xml
+data/broadcast/BAR-ATH_broadcast_atd.txt
+data/broadcast/BAR-ATH_broadcast_homography.csv
 ```
 
 ```bash
 python run.py --team YamineLamal
 ```
 
-This takes about a minute on a laptop and writes `submission/YamineLamal.csv` and
+This takes about 6 minutes on a laptop (the broadcast alignment is most of it) and writes `submission/YamineLamal.csv` and
 `submission/YamineLamal_report.json`. The run is deterministic: the same data and the same command
 give a byte-identical file.
 
@@ -60,9 +66,12 @@ python evaluation/run_evaluation.py
 | `--mode auto` (default) | `full` if `BAR-ATH_tactical_atd.txt` is present, else `basic` |
 | `--mode full` | raw tracking: nearest-player distances, player speed, ball speed, ball against the lines, team spread |
 | `--mode basic` | no raw tracking needed. Uses the organisers' published nearest-player signal (`evaluation/results/baseline_raw.csv`, computed from the ATD by their `starter/baseline.py`) |
-| `--no-camera` | ignore the homography |
+| `--no-broadcast` | skip broadcast fusion (about 1 minute). This reproduces our earlier tactical-only file |
+| `--no-camera` | ignore the tactical homography |
 
-The submitted file was generated with `--mode full` (`auto` with the complete data bundle).
+Broadcast fusion switches on automatically when the three broadcast files are present. The
+submitted file was generated with the plain command above and all seven files: `mode: full +
+broadcast fusion`.
 
 ## Repository layout
 
@@ -73,6 +82,7 @@ possession/
   sources.py                readers: raw ATD, ATD metadata, Smart Tagging, published nearest signal
   features.py               per-frame categorical features
   hmm.py                    tied 3-state HMM, tempered EM, Viterbi, evidence-scale calibration
+  broadcast.py              broadcast-to-tactical alignment (shots, offset search, checks) and ball fill
   pipeline.py               data in, possession file out
 scripts/sensitivity.py      unsupervised robustness check: how much the output moves per prior
 tests/                      synthetic-data tests (no match data needed): python -m pytest -q

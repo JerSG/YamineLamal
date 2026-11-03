@@ -163,6 +163,46 @@ def test_submission_format_passes_official_validator():
         assert len(pd.read_csv(path)) == 199319
 
 
+def test_broadcast_alignment_recovers_offset_and_rejects_garbage():
+    """A synthetic 'broadcast' = a partial, noisy view of the tactical players at a known offset,
+    plus one shot of unrelated positions. The aligner must find the offset, fill only missing
+    tactical balls, and reject the garbage shot."""
+    from possession import broadcast as B
+    rng = np.random.RandomState(1)
+    T, n_slots, pitch = 3000, 8, (105.3, 68.0)
+    slot_team = np.array([0, 0, 0, 0, 1, 1, 1, 1], dtype=np.int8)
+    # tactical: players on slow random walks, ball near player 0, missing every 3rd frame
+    walk = np.cumsum(rng.normal(0, 0.002, (T, n_slots, 2)), axis=0) + rng.uniform(0.2, 0.8,
+                                                                               (1, n_slots, 2))
+    tac_players = np.concatenate([walk, np.ones((T, n_slots, 1))], axis=2).astype(np.float32)
+    tac_ball = np.full((T, 3), np.nan, dtype=np.float32)
+    tac_ball[:, :2] = walk[:, 0] + 0.003
+    tac_ball[::3] = np.nan
+    # broadcast: frames 0..1199 show tactical frames 700..1899 (offset +700), 6 of 8 players
+    offset, n_bc = 700, 1500
+    bc_players = np.full((n_bc, n_slots, 3), np.nan, dtype=np.float32)
+    bc_players[:1200, :6, :2] = walk[offset:offset + 1200, :6] + rng.normal(0, 0.002, (1200, 6, 2))
+    bc_players[1200:, :6, :2] = rng.uniform(0, 1, (300, 6, 2))   # garbage shot
+    bc_ball = np.full((n_bc, 3), np.nan, dtype=np.float32)
+    bc_ball[:1200, :2] = walk[offset:offset + 1200, 0] + 0.003
+    aim = np.zeros((n_bc, 2))
+    aim[1200:] = 0.9          # a cut between the two shots
+    ok = np.ones(n_bc, dtype=bool)
+    tac_of_bc, table = B.align(bc_players, bc_ball, slot_team, tac_players, tac_ball, slot_team,
+                               aim, ok, pitch, verbose=False)
+    good = [r for r in table if r["start"] == 0][0]
+    assert good["offset"] == offset and good["accepted"], good
+    assert good["ball_median_err_m"] < 0.5
+    bad = [r for r in table if r["start"] == 1200][0]
+    assert not bad["accepted"], bad
+    assert np.all(tac_of_bc[:1200] == np.arange(1200) + offset) and np.all(tac_of_bc[1200:] == -1)
+    filled, mask = B.fill_ball(tac_ball, bc_ball, tac_of_bc)
+    seen = np.isfinite(tac_ball[:, 0])
+    assert not mask[seen].any()                                   # never overrides a real ball
+    assert np.array_equal(filled[seen], tac_ball[seen], equal_nan=True)
+    assert mask[offset:offset + 1200][~seen[offset:offset + 1200]].all()   # fills every gap
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

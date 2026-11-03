@@ -13,6 +13,11 @@ Modes
          ATD by starter/baseline.py. Smart Tagging and homography features are identical in both.
   auto   full if the raw tracking is present, else basic. The mode used is printed and recorded
          in the run report, so a file can always be regenerated with the same command.
+
+Broadcast fusion (full mode, on when data/broadcast/ holds the broadcast ATD + homography): the
+broadcast recording is aligned to the tactical timeline shot by shot (possession/broadcast.py), and
+tactical frames with no tracked ball take the ball from the aligned broadcast frame. An observed
+tactical ball is never overridden. --no-broadcast switches it off.
 """
 
 import json
@@ -31,6 +36,48 @@ sys.path.insert(0, ROOT)
 import games  # noqa: E402
 
 NEAREST_SIGNAL = os.path.join(ROOT, "evaluation", "results", "baseline_raw.csv")
+
+
+def broadcast_hook(data_dir=None, verbose=True):
+    """A ball_hook that fills tactical ball gaps from the aligned broadcast, or None if the
+    broadcast files are not all present."""
+    from . import broadcast as B
+    bpaths = games.asset_paths(data_dir=data_dir, source="broadcast")
+    need = ("atd_meta", "atd_raw", "homography")
+    if not all(S.file_exists(bpaths[k]) for k in need):
+        return None
+    n_bc = games.source_frames("broadcast")
+
+    def hook(players, ball, meta):
+        if verbose:
+            print("reading broadcast tracking + homography ...")
+        bmeta = S.read_atd_meta(bpaths["atd_meta"])
+        bp, bb = S.read_atd(bpaths["atd_raw"], len(bmeta["slot_team"]), n_bc)
+        aim, ok = B.camera_aim(bpaths["homography"], n_bc)
+        if verbose:
+            print("aligning broadcast shots to the tactical timeline (a few minutes) ...")
+        tac_of_bc, table = B.align(bp, bb, bmeta["slot_team"], players, ball, meta["slot_team"],
+                                   aim, ok, games.GAMES[games.GAME]["pitch"], verbose=verbose)
+        filled, mask = B.fill_ball(ball, bb, tac_of_bc)
+        acc = [r for r in table if r["accepted"]]
+        checked = [r for r in acc if r["ball_check_frames"] > 0]
+        errs = np.concatenate([[r["ball_median_err_m"]] * r["ball_check_frames"] for r in checked]) \
+            if checked else np.array([np.nan])
+        info = {"broadcast": {
+            "shots": len(table), "shots_accepted": len(acc),
+            "broadcast_frames_mapped": int((tac_of_bc >= 0).sum()),
+            "tactical_ball_frames_filled": int(mask.sum()),
+            "ball_check_median_error_m": float(np.median(errs)),
+            "offsets_accepted": sorted({r["offset"] for r in acc}),
+        }}
+        if verbose:
+            b = info["broadcast"]
+            print("  shots accepted {}/{}; tactical ball filled on {} frames; independent ball "
+                  "check: median {:.2f} m".format(b["shots_accepted"], b["shots"],
+                                                  b["tactical_ball_frames_filled"],
+                                                  b["ball_check_median_error_m"]))
+        return filled, info
+    return hook
 
 
 def graded_blocks(game=games.GAME):
@@ -66,10 +113,11 @@ def dead_ball_constraints(events, n_frames, blocks):
     return allowed, forced
 
 
-def build_features(mode, paths, events, n_frames, blocks, use_camera=True, verbose=True):
+def build_features(mode, paths, events, n_frames, blocks, use_camera=True, verbose=True,
+                   ball_hook=None):
     meta = S.read_atd_meta(paths["atd_meta"]) if S.file_exists(paths.get("atd_meta")) else None
     feats = []
-    info = {"mode": mode}
+    info = {"mode": mode, "broadcast_fusion": ball_hook is not None}
 
     if mode == "full":
         if meta is None:
@@ -77,6 +125,9 @@ def build_features(mode, paths, events, n_frames, blocks, use_camera=True, verbo
         if verbose:
             print("reading raw tracking {} ...".format(os.path.basename(paths["atd_raw"])))
         players, ball = S.read_atd(paths["atd_raw"], len(meta["slot_team"]), n_frames)
+        if ball_hook is not None:  # e.g. fill tactical ball gaps from the aligned broadcast
+            ball, hook_info = ball_hook(players, ball, meta)
+            info.update(hook_info)
         t = F.tracking_summary(players, ball, meta["slot_team"], games.GAMES[games.GAME]["pitch"])
         del players
         info["ball_tracked_fraction"] = float(t["ball_seen"].mean())
@@ -108,21 +159,24 @@ def build_features(mode, paths, events, n_frames, blocks, use_camera=True, verbo
 
 
 def run(mode="auto", out_path=None, use_camera=True, report_path=None, verbose=True,
-        data_dir=None):
+        data_dir=None, ball_hook=None, use_broadcast=True):
     paths = games.asset_paths(data_dir=data_dir)
     n_frames = games.source_frames("tactical")
     if not S.file_exists(paths["smart_tagging"]):
         raise IOError("Smart Tagging not found: {}".format(paths["smart_tagging"]))
     if mode == "auto":
         mode = "full" if S.file_exists(paths["atd_raw"]) else "basic"
+    if ball_hook is None and use_broadcast and mode == "full":
+        ball_hook = broadcast_hook(data_dir, verbose)
     if verbose:
-        print("mode: {}".format(mode))
+        print("mode: {}{}".format(mode, " + broadcast fusion" if ball_hook is not None else ""))
 
     events = S.read_smart_tagging(paths["smart_tagging"], C.FPS)
     halves = graded_blocks()
     blocks = [(s, e) for _, s, e in halves]
 
-    feats, info = build_features(mode, paths, events, n_frames, halves, use_camera, verbose)
+    feats, info = build_features(mode, paths, events, n_frames, halves, use_camera, verbose,
+                                 ball_hook)
     allowed, forced = dead_ball_constraints(events, n_frames, halves)
     if verbose:
         print("features: {}".format(", ".join(info["features"])))

@@ -98,3 +98,23 @@ OUT_MARGIN_M = 0.5
 EDGE_MARGIN_M = 1.5
 # [football] The team in possession spreads out, the defending team compacts. log(area ratio) bins.
 SPREAD_LOG_RATIO = 0.25
+
+# -------------------------------------------------------------------------------------------------
+# Broadcast alignment (possession/broadcast.py) -- geometry only, no labels
+# -------------------------------------------------------------------------------------------------
+# [football] A broadcast camera pans at most a few metres of pitch per frame (25 fps); a larger
+# jump of its aim point is a cut to another shot.
+BC_CUT_JUMP_M = 4.0
+BC_MIN_SHOT_FRAMES = 50       # [model] shots shorter than 2 s are not worth aligning
+BC_MIN_PLAYERS = 4            # [model] frames with fewer tracked players carry no shape to match
+BC_SAMPLES_PER_SHOT = 6       # [model] sample frames per shot for the offset search
+BC_MATCH_CAP_M = 5.0          # [model] cap on one player's mismatch (partial views, tracker errors)
+BC_RUNNER_UP_EXCLUSION = 50   # [model] offsets within 2 s of the best do not count as rivals
+BC_COARSE_STEP = 5            # [model] coarse offset grid (0.2 s), then refined frame by frame
+BC_REFINE_CANDIDATES = 8      # [model] coarse minima refined at full resolution
+# [model] Acceptance: players fit within ~1.5 m on average, the best offset beats any other offset
+# by 1 m, and where both trackers see the ball the two positions agree (median) within 2 m.
+BC_MAX_COST_M = 1.5
+BC_MIN_MARGIN_M = 1.0
+BC_MIN_BALL_CHECK_FRAMES = 10
+BC_MAX_BALL_ERR_M = 2.0

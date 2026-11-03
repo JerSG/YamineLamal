@@ -10,8 +10,13 @@ date: "November 2026"
 We label every frame of FC Barcelona vs Athletic Club `H`, `A` or `D` with a **three-state hidden
 Markov model** (home in possession, away in possession, dead ball):
 
-* **Nine per-frame categorical features**, built from the automatic tracking, the Smart Tagging
-  and the tactical homography.
+* **Two-camera fusion.** The broadcast recording is aligned to the tactical timeline
+  automatically, shot by shot, by matching player positions (no mapping is provided). Its ball
+  then fills tactical frames where the ball was not tracked. The alignment is checked on the
+  ball, which the alignment never looks at: the two cameras' ball positions agree to a median of
+  0.76 m.
+* **Nine per-frame categorical features**, built from the fused tracking, the Smart Tagging and
+  the tactical homography.
 * **Emission tables learned by unsupervised EM over the whole match.** No label of any kind is
   read. The home and away states are tied by a mirror symmetry, and the dead-ball state may only
   be learned from features that physically measure a stoppage.
@@ -27,12 +32,13 @@ Markov model** (home in possession, away in possession, dead ball):
 | ground truth | | | 17 |
 | organisers' floor, `baseline_smooth50` | 0.621 | 0.326 | 26 |
 | organisers' `baseline_smooth125` | 0.581 | 0.424 | 16 |
-| **this submission** | **0.668** | **0.423** | **18** |
+| ours, tactical tracking only (`--no-broadcast`) | 0.668 | 0.423 | 18 |
+| **this submission (with broadcast fusion)** | **0.690** | **0.471** | **17** |
 
-On these 17 possessions the bootstrap 5-95% interval of our spellF1 is 0.27 to 0.58, so the
-window cannot separate us from `baseline_smooth125`. The repository shows that
-`baseline_smooth125` *loses* to `smooth50` on the full match (0.224 vs 0.243). Our macroF1 is
-the best of the five reference files, and our possession count (18 vs 17) is the closest.
+Seventeen possessions give a wide bootstrap interval, so these numbers check that the pipeline
+works; they do not rank it. The repository shows that `baseline_smooth125` *loses* to `smooth50`
+on the full match (0.224 vs 0.243) despite winning here. The case for broadcast fusion rests on
+the label-free evidence in Section 4.7, not on this table.
 
 The public window holds 17 possessions, and the repository shows that it ranks two baselines in
 the wrong order. We report it because it is the only external number available. **No parameter
@@ -61,14 +67,15 @@ their meaning (Section 4.3).
 | tactical ATD, `_atd.txt` + `.xml` | ball and player positions, player speed, team of each track slot, attack direction | **Speeds are m/s**, although the metadata labels them `kph`: median 1.3, 99.9th percentile 8.1. The ball's own speed channel is almost always NaN, so ball speed is computed from positions. |
 | Smart Tagging | open-play phases (which team attacks), set pieces, goals, kickoffs | `N/A` team on every throw-in and kickoff, handled as its own value |
 | tactical homography | where the camera points (play location on every frame, including the 41% without a ball) | frames with `valid = 0` or reprojection error > 5 are "unknown" |
-| broadcast video, ATD, homography | **dropped** | not synchronised to the tactical timeline. Aligning it is a project of its own, and it covers fewer frames |
-| tactical video | **dropped** | we used no video decoding. Everything comes from the provided tracking |
+| broadcast ATD `_atd.txt` + `.xml`, broadcast homography | **two-camera fusion** (Section 4.7): ball positions for tactical frames whose ball was not tracked | not synchronised to the tactical timeline; we align it ourselves. Same teams, same 0-1 pitch coordinates, 25 fps. Homography used only to find camera cuts |
+| tactical and broadcast videos | **dropped** | we used no video decoding. Everything comes from the provided tracking |
 | `evaluation/results/baseline_raw.csv` | only in `--mode basic`, a fallback when the raw ATD is absent | the organisers' unsmoothed nearest-player signal, computed from the ATD alone. In full mode we recompute it from the ATD and check that it agrees on **100.00%** of frames |
 
 **Data checks we ran.** The ATD has 199,319 records numbered 1..199,319, contiguous, every line in
 the declared `frame:players:ball` layout. The organisers' `starter/baseline.py`, run on our copy
 of the ATD, reproduces all four committed baseline files byte for byte. That confirms both the
-file and the `video_frame = frame_id - 1` alignment.
+file and the `video_frame = frame_id - 1` alignment. The broadcast ATD has 164,488 contiguous
+records, matching DATA.md.
 
 # 4. Method
 
@@ -128,9 +135,8 @@ clusters and bad dead balls. Three structural rules fixed this, and none of them
    times.
 
 The learned tables are physically sensible. On dead-ball frames the mean player speed is below
-0.9 m/s 36.8% of the time, against 4.0% on live frames. "Ball lost straight
-after going out" is 59.8% vs 0.1%. A still ball is 23.4% vs
-5.8%. The tables are dumped in `submission/<team>_report.json`.
+0.9 m/s 38.9% of the time, against 3.9% on live frames. "Ball lost straight after going out" is
+59.2% vs 0.1%. A still ball is 34.1% vs 5.3%. The tables are dumped in `submission/<team>_report.json`.
 
 ## 4.4 How much each feature counts
 
@@ -142,7 +148,7 @@ value.
 
 | feature | ball | pspeed | bspeed | bpos | spread | phase | setpiece | goal | camzone |
 |---|---|---|---|---|---|---|---|---|---|
-| mean run length = one look per … frames | 31 | 71 | 42 | 256 | 402 | 609 | 625 | 7565 | 749 |
+| mean run length = one look per … frames | 30 | 71 | 41 | 259 | 402 | 609 | 625 | 7565 | 749 |
 
 ## 4.5 The evidence scale: self-consistency instead of tuning
 
@@ -151,8 +157,8 @@ the total weight of evidence against transitions, which sets how many possession
 baselines show that choosing it on the public window picks the wrong value. We choose it by
 **self-consistency**. The transition model says a spell lasts 12 s on average, so the evidence
 scale is set, by bisection, to the value at which the *decoded* spells also average 12 s. EM and
-calibration alternate until the scale moves by less than 3% (it settles at 3.32 after
-7 rounds). The only input is the 12 s football prior. No label is read.
+calibration alternate until the scale moves by less than 3% (it settles at 3.30 after
+6 rounds). The only input is the 12 s football prior. No label is read.
 
 ## 4.6 Decoding and output
 
@@ -160,6 +166,62 @@ Viterbi runs separately on each graded half. Graded frames get `H`, `A` or `D`. 
 (before kickoff, half time, after the final whistle) get `X`, which is never scored. We never
 abstain on a graded frame: under spellF1 an `X` repeats the previous label anyway, and under
 macroF1 it is a guaranteed miss.
+
+## 4.7 Two-camera fusion: aligning the broadcast to the tactical timeline
+
+**Why.** The tactical tracking has no ball on 41% of graded frames (64,643 frames), and that is
+the model's main weakness: a possession change inside a long gap is found late or not at all,
+and a ball-missing stretch of live play can be mistaken for a stoppage. The broadcast camera
+films the same moments from another angle.
+
+**The problem.** The broadcast is on its own timeline, with cuts, replays and zooms, and no
+mapping is provided. Inside one continuous camera *shot*, though, both recordings run at 25 fps,
+so the whole shot maps onto the tactical video by a single frame offset.
+
+**Method** (`possession/broadcast.py`, geometry only):
+
+1. **Shots.** Runs of broadcast frames with a valid homography and at least 4 tracked players,
+   split at cuts. A cut is a jump of the camera's aim point of more than 4 m of pitch between two
+   frames (1/25 s), which no pan can produce. There are 160 shots of at least 2 s.
+2. **Offset per shot.** For 6 sample frames of the shot, the cost of a tactical frame is the mean
+   distance from each broadcast player to the nearest *same-team* tactical player, capped at
+   5 m so that a partial view or a tracker error cannot dominate. Summing the samples' costs at a
+   common offset and minimising gives the shot's offset. **Every offset across the whole match is
+   searched**, coarse-to-fine (every 5th offset, then each frame around the 8 best). This gives
+   exactly the same mapping as an exhaustive frame-by-frame search, which we verified, at a
+   third of the cost. Because the search is global, replays find the moment they replay.
+3. **Acceptance.** A shot is used only if (a) players fit within 1.5 m on average, (b) the best
+   offset beats every offset more than 2 s away by at least 1 m, and (c) **an independent
+   check**: where both trackers see the ball, which the offset search never looks at, the two
+   ball positions agree to a median of at most 2 m.
+
+**Result.** 110 of 160 shots are accepted, mapping 90,445 broadcast frames. Their ball check
+agrees to a **median of 0.76 m**, which is tracker noise. The accepted offsets are themselves a
+check: live first-half play sits at +4011…+4017 frames, live second-half play at +26916…+26922
+(the broadcast cut most of half time), and the three exceptions are replays, each matched to the
+earlier moment it shows. We never told the aligner any of this.
+
+**Fusion.** Where the tactical ball is missing and an aligned broadcast frame has one, the
+tactical frame takes the broadcast ball. An observed tactical ball is never overridden, and when
+a replay maps a second broadcast frame onto the same moment, the live one is kept. This fills
+**4,763** of the 64,643 graded ball-missing frames (7.4%). When the tactical tracker loses the
+ball (crowded boxes, high balls), the broadcast tracker usually loses it too. Nothing else in the
+pipeline changes: the same features, the same EM and the same calibration run on the fused ball.
+
+**Does it help? Label-free evidence.** Fusion changes 3.2% of graded frames, almost all from `D`
+to live play. Player speed is an independent physical signal that the change did not come from,
+so it can tell whether the change is right:
+
+| frames | median mean player speed | share of frames with players walking (< 0.9 m/s) |
+|---|---|---|
+| live in both versions | 2.06 m/s | 4.0% |
+| dead in both versions | 1.02 m/s | 39.1% |
+| **flipped dead → live by fusion** (4,573) | **2.11 m/s** | **4.4%** |
+| **flipped live → dead by fusion** (260) | **1.04 m/s** | **35.0%** |
+
+The frames fusion turns live move exactly like live play, and the frames it turns dead move like
+stoppages. Without the broadcast ball, those stretches of real play were being read as dead
+balls because the tactical ball was missing.
 
 # 5. Possession rules as implemented
 
@@ -178,16 +240,19 @@ macroF1 it is a guaranteed miss.
 
 # 6. Results and robustness
 
-**Full match (no ground truth available to us):** 300 possessions of mean
-12.0 s, 114 stoppages, frames H 53,494 / A 36,201 / D 69,162
-(43.5% dead). In professional football the ball is in play for about 55 to 60 of ~95
+**Full match (no ground truth available to us):** 316 possessions of mean 11.9 s, 105 stoppages,
+frames H 55,712 / A 38,296 / D 64,849 (40.8% dead). Without broadcast fusion: 300 possessions,
+43.5% dead. In professional football the ball is in play for about 55 to 60 of ~95
 minutes, so a dead share of around 40% of graded frames is realistic.
 
-**Public 5 minutes:** macroF1 0.668, spellF1 0.423, 18 possessions vs 17
-true, alive/dead F1 0.893, team accuracy on frames both call alive 0.891.
+**Public 5 minutes:** macroF1 0.690, spellF1 0.471, 17 possessions vs 17 true, alive/dead F1
+0.906, team accuracy on frames both call alive 0.894 (without fusion: 0.668, 0.423, 18, 0.893,
+0.891).
 
 **Sensitivity (unsupervised).** `scripts/sensitivity.py` changes one prior at a time and compares
-the full-match output with the reference run. No ground truth is involved.
+the full-match output with the reference run. No ground truth is involved. The table below was
+measured on the tactical-only pipeline (`--no-broadcast`); the script also varies the broadcast
+acceptance thresholds.
 
 | variant | frames unchanged | possessions | mean spell (s) |
 |---|---|---|---|
@@ -220,6 +285,13 @@ was searched against it. Every constant in `possession/config.py` is tagged with
 (4.5). The kickoff offset comes from the two kickoff frames published in DATA.md, which are
 boundaries rather than labels.
 
+For broadcast fusion, all alignment and acceptance thresholds were written down before the first
+alignment ran, and none was changed afterwards. The one change after that, a faster search, was
+adopted only after we verified it reproduces the exhaustive search's mapping exactly. The decision
+to adopt fusion rests on the label-free player-speed check in 4.7. The public score was looked at
+once, afterwards, as a sanity check. `scripts/sensitivity.py` shows the result does not hinge on
+the thresholds (Section 6).
+
 # 8. Training data
 
 **None.** No labelled dataset of any kind was used, from this game or any other. All parameters
@@ -228,10 +300,13 @@ provided tracking and tagging of this game.
 
 # 9. Limitations and what we would do next
 
-* **Turnovers while the ball is not tracked.** Without a ball, possession is carried forward, and
-  only slow features (tags, spread, camera zone) can move it. A turnover inside a long gap is
-  found late or not at all. Next step: a learned "ball location" model from player motion
-  (players converge on the ball), or ball detection on the tactical video.
+* **Turnovers while the ball is not tracked.** Fusion recovers 7.4% of the ball-missing frames;
+  on the rest, possession is carried forward and only slow features (tags, spread, camera zone)
+  can move it. Next step: a "ball location" model from player motion (players converge on the
+  ball), or ball detection on the videos.
+* **Broadcast alignment is per shot.** Shots with too few visible players (close-ups) or with a
+  weak or ambiguous fit are discarded, not repaired: 50 of 160 shots. Within a shot the offset
+  is constant; a frame dropped by the broadcast encoder inside a shot would shift it by one frame.
 * **Geometric durations.** A plain HMM favours very short and very long stoppages equally per
   frame. An explicit-duration (semi-Markov) model would encode that throw-ins last ~10 s and goal
   celebrations ~60 s.
@@ -249,10 +324,11 @@ provided tracking and tagging of this game.
 # Python 3.12+ (the pinned numpy 2.5.3 requires it); verified on 3.13
 pip install -r requirements.txt               # numpy, pandas (scorer), pytest (tests)
 # unpack the match data into data/ (see data/README.md)
-python run.py --team YamineLamal                # ~1 minute; deterministic
+python run.py --team YamineLamal              # ~6 minutes with broadcast fusion; deterministic
+python run.py --team YamineLamal --no-broadcast   # ~1 minute, tactical only (previous version)
 python evaluation/validate_submission.py submission/YamineLamal.csv
 python -m pytest -q tests                     # synthetic-data tests, no match data needed
-python scripts/sensitivity.py                 # optional: the robustness table above (~40 min)
+python scripts/sensitivity.py                 # optional: the robustness table above (~20 min)
 ```
 
 Verified: two clean runs of `python run.py` give byte-identical files (SHA-256
