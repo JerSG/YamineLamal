@@ -249,27 +249,36 @@ minutes, so a dead share of around 40% of graded frames is realistic.
 0.906, team accuracy on frames both call alive 0.894 (without fusion: 0.668, 0.423, 18, 0.893,
 0.891).
 
-**Sensitivity (unsupervised).** `scripts/sensitivity.py` changes one prior at a time and compares
-the full-match output with the reference run. No ground truth is involved. The table below was
-measured on the tactical-only pipeline (`--no-broadcast`); the script also varies the broadcast
-acceptance thresholds.
+**Sensitivity (unsupervised).** `scripts/sensitivity.py` changes one setting at a time and
+compares the full-match output with the submitted file. No ground truth is involved.
 
 | variant | frames unchanged | possessions | mean spell (s) |
 |---|---|---|---|
-| reference | 100.00% | 300 | 12.0 |
-| alive spell 10 s | 98.52% | 361 | 10.0 |
-| alive spell 15 s | 97.83% | 238 | 14.9 |
-| stoppage share 0.25 | 99.95% | 298 | 12.0 |
-| stoppage share 0.40 | 99.95% | 298 | 12.0 |
-| dead spell 12 s | 100.00% | 300 | 12.0 |
-| dead spell 25 s | 99.95% | 298 | 12.0 |
-| prior strength 500 | 99.57% | 301 | 12.0 |
-| prior strength 8000 | 99.58% | 298 | 12.0 |
-| control radius 1.5 m | 98.74% | 297 | 12.1 |
-| control radius 3 m | 96.62% | 294 | 12.0 |
-| no camera | 99.93% | 298 | 12.0 |
+| reference | 100.00% | 316 | 11.9 |
+| alive spell 10 s | 98.43% | 375 | 10.0 |
+| alive spell 15 s | 97.75% | 247 | 15.1 |
+| stoppage share 0.25 | 99.84% | 312 | 12.0 |
+| stoppage share 0.40 | 99.92% | 314 | 12.0 |
+| dead spell 12 s | 99.87% | 313 | 12.0 |
+| dead spell 25 s | 99.91% | 314 | 12.0 |
+| prior strength 500 | 99.55% | 312 | 12.1 |
+| prior strength 8000 | 99.47% | 313 | 11.9 |
+| control radius 1.5 m | 98.58% | 314 | 11.9 |
+| control radius 3 m | 96.09% | 308 | 12.0 |
+| no camera | 99.81% | 312 | 12.0 |
+| broadcast: strict fit 1.0 m | 99.45% | 312 | 11.9 |
+| broadcast: loose fit 2.0 m | 99.77% | 315 | 12.0 |
+| broadcast: ball check 1.5 m | 99.79% | 313 | 12.0 |
+| broadcast: ball check 3.0 m | 99.49% | 314 | 12.0 |
+| no broadcast | 96.80% | 300 | 12.0 |
 
-Every perturbation leaves at least 96.6% of graded frames unchanged. The only prior that moves the possession count is the assumed mean spell length, because it is the target of the self-consistent scale (4.5). Even then the frame labels barely move: the count changes because short spells split or merge at the margin. The camera feature contributes little (99.93% unchanged without it). We keep it because it is the only location signal on frames without a ball.
+Every model prior leaves at least 96.1% of graded frames unchanged. The only prior that moves the
+possession count is the assumed mean spell length, because it is the target of the
+self-consistent scale (4.5); even then the frame labels barely move. **The broadcast fusion does
+not hinge on its thresholds**: a stricter or looser player fit, or a stricter or looser ball check,
+leaves at least 99.45% of frames unchanged. Removing fusion altogether changes 3.2%, the frames
+Section 4.7 shows are corrected. The camera feature contributes little (99.81% unchanged without
+it). We keep it because it is the only location signal on frames without a ball.
 
 # 7. Use of the public ground truth
 
