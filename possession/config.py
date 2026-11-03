@@ -120,3 +120,23 @@ BC_MAX_COST_M = 1.5
 BC_MIN_MARGIN_M = 1.0
 BC_MIN_BALL_CHECK_FRAMES = 10
 BC_MAX_BALL_ERR_M = 2.0
+
+# -------------------------------------------------------------------------------------------------
+# Optional video ball detection (possession/video.py, scripts/detect_ball_video.py)
+# -------------------------------------------------------------------------------------------------
+VIDEO_WEIGHTS = "yolo11s.pt"  # public COCO model; Ultralytics downloads it on first use into
+                              # data/models/ (gitignored, never committed)
+VIDEO_TORCH_THREADS = 1       # deterministic CPU inference; raise for speed (may vary by machine)
+VIDEO_MIN_CONF = 0.25         # [model] detector confidence floor (Ultralytics' default)
+VIDEO_STEP = 5                # [model] look at every 5th missing-ball frame (0.2 s)
+VIDEO_CHECK_EVERY = 40        # [model] acceptance sample: every 40th tracked-ball frame
+VIDEO_PITCH_MARGIN_M = 2.0    # [football] a detection must project within 2 m of the pitch
+VIDEO_NEIGHBOUR_FRAMES = 25   # [model] neighbours within 1 s are used for the jump test
+VIDEO_MAX_BALL_SPEED_MS = 40.0  # [football] faster than any kicked ball (~35 m/s record shots)
+VIDEO_MAX_INTERP_FRAMES = 10  # [model] interpolate between detections at most 0.4 s apart
+VIDEO_MAX_INTERP_M = 8.0      # [model] ... and at most 8 m apart
+# [model] Acceptance, measured on frames where the tracker sees the ball: enough detections, the
+# detector's ball within 1.5 m of the tracker's (median), and 80% of them within 3 m.
+VIDEO_MIN_CHECK_DETECTIONS = 300
+VIDEO_MAX_MEDIAN_ERR_M = 1.5
+VIDEO_MIN_SHARE_WITHIN_3M = 0.80

@@ -73,6 +73,28 @@ Broadcast fusion switches on automatically when the three broadcast files are pr
 submitted file was generated with the plain command above and all seven files: `mode: full +
 broadcast fusion`.
 
+## Optional: detect the ball in the video
+
+The ball is still untracked on ~59,000 graded frames after the broadcast fill. An optional step
+looks for it directly in the tactical video with a public pre-trained detector (Ultralytics YOLO,
+COCO "sports ball"), converts detections to pitch coordinates with the provided homography, and
+**checks itself**: on a sample of frames where the tracker does see the ball, the detector's ball
+must be within 1.5 m of it (median), with 80% within 3 m. If the check fails, `run.py` ignores
+the result and the submission is unchanged.
+
+It is off unless you run it, and it needs the tactical video and extra libraries:
+
+```bash
+pip install -r requirements-video.txt
+python scripts/detect_ball_video.py --limit 300   # 5-10 minute trial, never used by run.py
+python scripts/detect_ball_video.py               # full run: ~4 h on a CPU, much less on a GPU
+python run.py                                     # prints "+ video ball" if the check PASSED
+```
+
+The detections are written to `data/derived/` and the model to `data/models/`, both gitignored:
+they are derived from the match data and must not be published. The summary the script prints
+contains only aggregate numbers.
+
 ## Repository layout
 
 ```
@@ -83,8 +105,11 @@ possession/
   features.py               per-frame categorical features
   hmm.py                    tied 3-state HMM, tempered EM, Viterbi, evidence-scale calibration
   broadcast.py              broadcast-to-tactical alignment (shots, offset search, checks) and ball fill
+  video.py                  optional ball detection in the tactical video, with its own acceptance check
   pipeline.py               data in, possession file out
 scripts/sensitivity.py      unsupervised robustness check: how much the output moves per prior
+scripts/detect_ball_video.py  the optional video step (see above)
+requirements-video.txt      extra, pinned libraries for the video step only
 tests/                      synthetic-data tests (no match data needed): python -m pytest -q
 evaluation/                 the organisers' scorer, unchanged (MIT), with the public 5-min GT
 games.py                    the organisers' per-match constants, unchanged (MIT)

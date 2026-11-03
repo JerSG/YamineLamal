@@ -1,0 +1,13 @@
+# Only for the OPTIONAL video step (scripts/detect_ball_video.py). The main pipeline does not need
+# any of this. Pinned to the versions it was tested with (Python 3.13; Windows builds exist for
+# Python 3.12+).
+#
+#   pip install -r requirements.txt -r requirements-video.txt
+#
+# On Windows/Linux, pip installs the GPU-capable PyTorch from PyPI (a large download). For a
+# smaller CPU-only install, first run:
+#   pip install torch==2.15.0 torchvision==0.29.2 --index-url https://download.pytorch.org/whl/cpu
+torch==2.15.0
+torchvision==0.29.2
+ultralytics==8.4.201
+opencv-python-headless==5.0.0.93

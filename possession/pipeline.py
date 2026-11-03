@@ -117,7 +117,7 @@ def build_features(mode, paths, events, n_frames, blocks, use_camera=True, verbo
                    ball_hook=None):
     meta = S.read_atd_meta(paths["atd_meta"]) if S.file_exists(paths.get("atd_meta")) else None
     feats = []
-    info = {"mode": mode, "broadcast_fusion": ball_hook is not None}
+    info = {"mode": mode, "ball_fusion": ball_hook is not None}
 
     if mode == "full":
         if meta is None:
@@ -158,18 +158,56 @@ def build_features(mode, paths, events, n_frames, blocks, use_camera=True, verbo
     return feats, info
 
 
+def video_hook(inner, verbose=True):
+    """Wrap a ball_hook (or None) so remaining gaps are filled from the video detections, when
+    scripts/detect_ball_video.py has been run and its acceptance test PASSED. Returns None when
+    there is nothing to add, so the pipeline is unchanged without the video step."""
+    from . import video as V
+    points, stats = V.read_outputs(os.path.join(ROOT, "data", "derived"))
+    if points is None:
+        return inner
+    if not stats.get("passed") or stats.get("trial_run"):
+        if verbose:
+            print("video ball detections present but not used (check {}).".format(
+                "was a trial run" if stats.get("trial_run") else "FAILED"))
+        return inner
+
+    def hook(players, ball, meta):
+        info = {}
+        if inner is not None:
+            ball, info = inner(players, ball, meta)
+        filled, gap = V.fill_from_video(ball, points, len(ball), games.GAMES[games.GAME]["pitch"])
+        info["video"] = {"frames_filled": int(gap.sum()),
+                         "check_median_error_m": stats.get("median_error_m"),
+                         "check_share_within_3m": stats.get("share_within_3m")}
+        if verbose:
+            print("  video ball: filled {} more frames (check: median {:.2f} m)".format(
+                int(gap.sum()), stats.get("median_error_m")))
+        return filled, info
+    return hook
+
+
 def run(mode="auto", out_path=None, use_camera=True, report_path=None, verbose=True,
-        data_dir=None, ball_hook=None, use_broadcast=True):
+        data_dir=None, ball_hook=None, use_broadcast=True, use_video=True):
     paths = games.asset_paths(data_dir=data_dir)
     n_frames = games.source_frames("tactical")
     if not S.file_exists(paths["smart_tagging"]):
         raise IOError("Smart Tagging not found: {}".format(paths["smart_tagging"]))
     if mode == "auto":
         mode = "full" if S.file_exists(paths["atd_raw"]) else "basic"
-    if ball_hook is None and use_broadcast and mode == "full":
-        ball_hook = broadcast_hook(data_dir, verbose)
+    fusion = []
+    if ball_hook is None and mode == "full":
+        if use_broadcast:
+            ball_hook = broadcast_hook(data_dir, verbose)
+            if ball_hook is not None:
+                fusion.append("broadcast fusion")
+        if use_video:
+            with_video = video_hook(ball_hook, verbose)
+            if with_video is not ball_hook:
+                fusion.append("video ball")
+            ball_hook = with_video
     if verbose:
-        print("mode: {}{}".format(mode, " + broadcast fusion" if ball_hook is not None else ""))
+        print("mode: {}{}".format(mode, "".join(" + " + f for f in fusion)))
 
     events = S.read_smart_tagging(paths["smart_tagging"], C.FPS)
     halves = graded_blocks()

@@ -2,6 +2,8 @@
 data/*
 !data/README.md
 *.mp4
+*.pt
+*.onnx
 
 # -- generated submissions: a full set of labels for the match ---------------------------------
 # The possession file is uploaded through the submission form, not published in the repository.

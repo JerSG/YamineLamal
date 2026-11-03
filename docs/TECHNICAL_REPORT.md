@@ -226,6 +226,29 @@ The frames fusion turns live move exactly like live play, and the frames it turn
 stoppages. Without the broadcast ball, those stretches of real play were being read as dead
 balls because the tactical ball was missing.
 
+## 4.8 Optional: ball detection in the tactical video (built, not used in this file)
+
+To reach the ~59,000 graded frames that neither tracker covers, the repository includes an
+optional step (`scripts/detect_ball_video.py`, `possession/video.py`):
+
+* every 5th still-missing frame is passed, in overlapping 640 px tiles at native resolution
+  (the ball is ~10-15 px wide), through a public pre-trained detector, Ultralytics YOLO11s, COCO
+  class "sports ball";
+* detections are mapped to the pitch with the inverse of the provided tactical homography,
+  dropped off the pitch, and dropped when reaching them would need a ball faster than 40 m/s;
+* short gaps (up to 0.4 s and 8 m) between detections are interpolated;
+* **acceptance** is measured on this match without labels: on every 40th frame where the
+  tactical tracker sees the ball, the detector's ball must land within 1.5 m of it (median),
+  with at least 80% within 3 m. Otherwise the pipeline ignores the detections. They only ever
+  fill missing balls and never override a tracked one.
+
+Inference is CPU-only and single-threaded by default, with deterministic settings and rounded
+outputs, so that it reproduces across machines. **The submitted file does not use this step.**
+We could not run it in our development environment, which never held the match video (the
+competition terms forbid sharing it with a hosted AI service). We tested it end to end on
+synthetic video, where its geometry is accurate to 0.03 m. Running it on the real video is the
+first thing we would do with more time, and it is designed to adopt itself only if it passes.
+
 # 5. Possession rules as implemented
 
 * **Ball alive or dead.** Dead where the evidence of a stoppage (walking players, ball still or
@@ -316,6 +339,9 @@ provided tracking and tagging of this game.
   on the rest, possession is carried forward and only slow features (tags, spread, camera zone)
   can move it. Next step: a "ball location" model from player motion (players converge on the
   ball), or ball detection on the videos.
+* **Video ball detection not yet run.** The optional detector (4.8) needs several CPU hours on
+  the full video, and its value depends on whether an off-the-shelf model finds the ball where
+  the provider's tracker could not.
 * **Broadcast alignment is per shot.** Shots with too few visible players (close-ups) or with a
   weak or ambiguous fit are discarded, not repaired: 50 of 160 shots. Within a shot the offset
   is constant; a frame dropped by the broadcast encoder inside a shot would shift it by one frame.

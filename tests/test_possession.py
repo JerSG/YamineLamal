@@ -203,6 +203,54 @@ def test_broadcast_alignment_recovers_offset_and_rejects_garbage():
     assert mask[offset:offset + 1200][~seen[offset:offset + 1200]].all()   # fills every gap
 
 
+def test_video_addon_geometry_filters_and_safety():
+    """Pure-numpy parts of the optional video step (no torch/OpenCV needed)."""
+    from possession import video as V
+    pitch = (105.3, 68.0)
+    # tiles cover a 1920x1080 frame completely, with overlap
+    cover = np.zeros((1080, 1920), dtype=bool)
+    for x, y in V.tiles(1920, 1080):
+        cover[y:y + V.TILE, x:x + V.TILE] = True
+    assert cover.all()
+    # pixels -> pitch inverts a pitch -> pixel homography
+    H = np.array([[1500.0, -300.0, 200.0], [10.0, 600.0, 150.0], [0.0, -0.3, 1.0]])
+    px = H @ np.array([0.3, 0.6, 1.0])
+    x, y = V.pixels_to_pitch(H, px[0] / px[2], px[1] / px[2])
+    assert abs(x - 0.3) < 1e-9 and abs(y - 0.6) < 1e-9
+    # an isolated detection 50 m away from both neighbours is dropped, plausible ones kept
+    pts = {100: (0.50, 0.50, 0.9), 105: (0.98, 0.50, 0.9), 110: (0.505, 0.50, 0.9)}
+    kept = V.drop_isolated_jumps(pts, pitch)
+    assert 105 not in kept and 100 in kept and 110 in kept
+    # interpolation fills short, close gaps only
+    xy = V.interpolate({100: (0.5, 0.5, 0.9), 105: (0.52, 0.5, 0.9), 200: (0.9, 0.5, 0.9)},
+                       300, pitch)
+    assert np.isfinite(xy[101:105, 0]).all() and np.isnan(xy[106:200, 0]).all()
+    # the video never overrides a tracked ball
+    ball = np.full((300, 3), np.nan)
+    ball[102] = [0.1, 0.1, np.nan]
+    filled, gap = V.fill_from_video(ball, {100: (0.5, 0.5, 0.9), 105: (0.52, 0.5, 0.9)},
+                                    300, pitch)
+    assert filled[102, 0] == 0.1 and not gap[102] and gap[101] and gap[103]
+    # the acceptance check fails a detector that is far from the tracker, passes a close one
+    trk = np.full((5000, 3), np.nan)
+    trk[:, 0], trk[:, 1] = 0.5, 0.5
+    checks = np.arange(0, 5000, 10)
+    near = {int(f): (0.5 + 0.005, 0.5, 0.8) for f in checks}       # 0.5 m off
+    far = {int(f): (0.5 + 0.1, 0.5, 0.8) for f in checks}          # 10.5 m off
+    assert V.check_against_tracker(near, trk, checks, pitch)["passed"]
+    assert not V.check_against_tracker(far, trk, checks, pitch)["passed"]
+    # files round-trip, and the pipeline ignores a failed or trial check
+    import tempfile
+    from possession import pipeline as P
+    with tempfile.TemporaryDirectory() as d:
+        V.write_outputs(d, near, {"passed": True, "median_error_m": 0.5}, {"weights": "x"})
+        points, stats = V.read_outputs(d)
+        assert points == near and stats["passed"]
+    assert V.read_outputs(os.path.join(ROOT, "no_such_folder")) == (None, None)
+    assert P.video_hook(None, verbose=False) is None or os.path.isdir(
+        os.path.join(ROOT, "data", "derived"))
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
