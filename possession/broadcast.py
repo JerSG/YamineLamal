@@ -80,10 +80,17 @@ class TacticalIndex(object):
         nearest same-team tactical player."""
         total = np.zeros(len(frames), dtype=np.float32)
         cap = np.float32(C.BC_MATCH_CAP_M)
+        # Each team's positions at these frames are gathered once, not once per point. The
+        # nearest player is found on squared distances and rooted once per frame: sqrt is
+        # monotonic and correctly rounded, so this is exactly min(sqrt(d^2)), only cheaper.
+        gathered = {side: (self.team[side][frames, :, 0], self.team[side][frames, :, 1])
+                    for side in set(int(s) for s in teams)}
         for (x, y), side in zip(points, teams):
-            T = self.team[side][frames]
-            d = np.sqrt((T[..., 0] - x) ** 2 + (T[..., 1] - y) ** 2)
-            d = np.where(np.isnan(d), np.inf, d).min(axis=1)
+            tx, ty = gathered[int(side)]
+            d2 = (tx - np.float32(x)) ** 2 + (ty - np.float32(y)) ** 2
+            nearest = np.fmin.reduce(d2, axis=1)  # ignores NaN slots; NaN only if all are NaN
+            d = np.sqrt(nearest)
+            d[np.isnan(d)] = np.inf
             total += np.minimum(d, cap)
         return total / max(len(points), 1)
 
@@ -142,20 +149,61 @@ def align_shot(index, bc_players, bc_team, start, end, pitch):
             "runner_up_m": runner_up, "n_samples": len(frames)}
 
 
+_WORKER = {}
+
+
+def _init_worker(tac_players, tac_slot_team, bc_players, bc_slot_team, pitch):
+    _WORKER["index"] = TacticalIndex(tac_players, tac_slot_team, pitch)
+    _WORKER["bc"] = (bc_players, bc_slot_team, pitch)
+
+
+def _align_one(shot):
+    bc_players, bc_slot_team, pitch = _WORKER["bc"]
+    return align_shot(_WORKER["index"], bc_players, bc_slot_team, shot[0], shot[1], pitch)
+
+
+def workers():
+    """Processes for the offset search: BC_WORKERS, or one per CPU core (at most 8) when 0."""
+    import os
+    n = C.BC_WORKERS or min(8, os.cpu_count() or 1)
+    return max(1, int(n))
+
+
 def align(bc_players, bc_ball, bc_slot_team, tac_players, tac_ball, tac_slot_team, aim, ok,
           pitch, verbose=True):
-    """Map broadcast frames to tactical frames. Returns (tac_of_bc, shot table)."""
+    """Map broadcast frames to tactical frames. Returns (tac_of_bc, shot table).
+
+    Shots are independent, so their offset searches run in parallel processes. A shot's result
+    does not depend on which process computed it, so the output is identical for any number of
+    workers.
+    """
     n_bc = len(bc_players)
     n_seen = np.isfinite(bc_players[..., 0]).sum(axis=1)
-    index = TacticalIndex(tac_players, tac_slot_team, pitch)
+    found = shots(aim, ok, n_seen, pitch)
+    n_workers = workers()
+    if verbose:
+        print("  broadcast shots to align: {} ({} worker process{})".format(
+            len(found), n_workers, "" if n_workers == 1 else "es"))
+    if n_workers > 1 and len(found) > 1:
+        import multiprocessing
+        from concurrent.futures import ProcessPoolExecutor
+        # "spawn" on every OS: it is the only mode Windows has, so the code path is the same
+        # everywhere. Workers get positions only (x, y as float32): about half the memory.
+        tac_xy = np.ascontiguousarray(tac_players[..., :2], dtype=np.float32)
+        bc_xy = np.ascontiguousarray(bc_players[..., :2], dtype=np.float32)
+        with ProcessPoolExecutor(max_workers=n_workers, initializer=_init_worker,
+                                 mp_context=multiprocessing.get_context("spawn"),
+                                 initargs=(tac_xy, tac_slot_team, bc_xy, bc_slot_team,
+                                           pitch)) as pool:
+            results = list(pool.map(_align_one, found, chunksize=1))
+    else:
+        index = TacticalIndex(tac_players, tac_slot_team, pitch)
+        results = [align_shot(index, bc_players, bc_slot_team, s, e, pitch) for s, e in found]
+
     table = []
     tac_of_bc = np.full(n_bc, -1, dtype=np.int64)
     length, width = pitch
-    found = shots(aim, ok, n_seen, pitch)
-    if verbose:
-        print("  broadcast shots to align: {}".format(len(found)))
-    for s, e in found:
-        r = align_shot(index, bc_players, bc_slot_team, s, e, pitch)
+    for (s, e), r in zip(found, results):
         if r is None:
             continue
         r["accepted"] = (r["cost_m"] <= C.BC_MAX_COST_M and

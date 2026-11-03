@@ -112,6 +112,8 @@ BC_MATCH_CAP_M = 5.0          # [model] cap on one player's mismatch (partial vi
 BC_RUNNER_UP_EXCLUSION = 50   # [model] offsets within 2 s of the best do not count as rivals
 BC_COARSE_STEP = 5            # [model] coarse offset grid (0.2 s), then refined frame by frame
 BC_REFINE_CANDIDATES = 8      # [model] coarse minima refined at full resolution
+BC_WORKERS = 0                # processes for the offset search; 0 = one per CPU core (max 8).
+                              # Changes only the run time, never the result.
 # [model] Acceptance: players fit within ~1.5 m on average, the best offset beats any other offset
 # by 1 m, and where both trackers see the ball the two positions agree (median) within 2 m.
 BC_MAX_COST_M = 1.5

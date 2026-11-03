@@ -187,9 +187,12 @@ so the whole shot maps onto the tactical video by a single frame offset.
    distance from each broadcast player to the nearest *same-team* tactical player, capped at
    5 m so that a partial view or a tracker error cannot dominate. Summing the samples' costs at a
    common offset and minimising gives the shot's offset. **Every offset across the whole match is
-   searched**, coarse-to-fine (every 5th offset, then each frame around the 8 best). This gives
-   exactly the same mapping as an exhaustive frame-by-frame search, which we verified, at a
-   third of the cost. Because the search is global, replays find the moment they replay.
+   searched**, coarse-to-fine (every 5th offset, then each frame around the 8 best, for both the
+   best offset and its runner-up). This gives exactly the same mapping and the same shot decisions
+   as an exhaustive frame-by-frame search, which we verified. Shots are searched in parallel on
+   all CPU cores, which changes only the run time. We tried a cheaper shortlist search and
+   rejected it: it gave the same mapping on this match but could overstate the runner-up margin,
+   which weakens check (b). Because the search is global, replays find the moment they replay.
 3. **Acceptance.** A shot is used only if (a) players fit within 1.5 m on average, (b) the best
    offset beats every offset more than 2 s away by at least 1 m, and (c) **an independent
    check**: where both trackers see the ball, which the offset search never looks at, the two
@@ -333,7 +336,7 @@ provided tracking and tagging of this game.
 # Python 3.12+ (the pinned numpy 2.5.3 requires it); verified on 3.13
 pip install -r requirements.txt               # numpy, pandas (scorer), pytest (tests)
 # unpack the match data into data/ (see data/README.md)
-python run.py --team YamineLamal              # ~6 minutes with broadcast fusion; deterministic
+python run.py --team YamineLamal              # ~2 minutes on 4 cores, with broadcast fusion; deterministic
 python run.py --team YamineLamal --no-broadcast   # ~1 minute, tactical only (previous version)
 python evaluation/validate_submission.py submission/YamineLamal.csv
 python -m pytest -q tests                     # synthetic-data tests, no match data needed

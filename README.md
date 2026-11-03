@@ -43,7 +43,7 @@ data/broadcast/BAR-ATH_broadcast_homography.csv
 python run.py --team YamineLamal
 ```
 
-This takes about 6 minutes on a laptop (the broadcast alignment is most of it) and writes `submission/YamineLamal.csv` and
+This takes about 2 minutes on a 4-core laptop (the broadcast alignment runs on all CPU cores) and writes `submission/YamineLamal.csv` and
 `submission/YamineLamal_report.json`. The run is deterministic: the same data and the same command
 give a byte-identical file.
 

@@ -55,7 +55,7 @@ def broadcast_hook(data_dir=None, verbose=True):
         bp, bb = S.read_atd(bpaths["atd_raw"], len(bmeta["slot_team"]), n_bc)
         aim, ok = B.camera_aim(bpaths["homography"], n_bc)
         if verbose:
-            print("aligning broadcast shots to the tactical timeline (a few minutes) ...")
+            print("aligning broadcast shots to the tactical timeline (about a minute) ...")
         tac_of_bc, table = B.align(bp, bb, bmeta["slot_team"], players, ball, meta["slot_team"],
                                    aim, ok, games.GAMES[games.GAME]["pitch"], verbose=verbose)
         filled, mask = B.fill_ball(ball, bb, tac_of_bc)
