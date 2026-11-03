@@ -4,9 +4,15 @@
 #
 #   pip install -r requirements.txt -r requirements-video.txt
 #
-# On Windows/Linux, pip installs the GPU-capable PyTorch from PyPI (a large download). For a
-# smaller CPU-only install, first run:
-#   pip install torch==2.15.0 torchvision==0.29.2 --index-url https://download.pytorch.org/whl/cpu
+# Which PyTorch you get from PyPI:
+#   Linux    -> a CUDA (NVIDIA GPU) build, large download
+#   Windows  -> a CPU-only build. For the GPU version on Windows, install PyTorch FIRST from
+#               the official selector (https://pytorch.org/get-started/locally/: choose
+#               Stable, Windows, Pip, Python, CUDA) and run the exact command it shows,
+#               with torch==2.15.0 torchvision==0.29.2 if it offers a choice of version.
+#               Then run the command above: pip keeps the CUDA build (2.15.0+cuXXX counts as
+#               2.15.0).
+#   Check:   python -c "import torch; print(torch.cuda.is_available())"   -> True means GPU ready
 torch==2.15.0
 torchvision==0.29.2
 ultralytics==8.4.201

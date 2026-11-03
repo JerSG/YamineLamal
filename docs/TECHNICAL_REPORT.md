@@ -329,9 +329,16 @@ the thresholds (Section 6).
 
 # 8. Training data
 
-**None.** No labelled dataset of any kind was used, from this game or any other. All parameters
-are either football priors written down before seeing labels, or learned by unsupervised EM on the
-provided tracking and tagging of this game.
+**The submitted file uses no labelled data.** No labelled dataset was used to produce it, from
+this game or any other. Its parameters are either general football priors, which were not fitted
+or tuned to any labels (see Section 7 for the one look at the public window), or learned by
+unsupervised EM on the provided tracking and tagging of this game.
+
+**The optional video step (4.8), not used in this file,** relies on a detector pre-trained by
+Ultralytics (YOLO11s) on the public **COCO** dataset: about 118,000 everyday images labelled by
+human annotators for the COCO project, including a "sports ball" class. It contains no images of
+this match, and we did no further training. It would be declared as training data if the step
+were adopted.
 
 # 9. Limitations and what we would do next
 

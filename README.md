@@ -82,12 +82,14 @@ COCO "sports ball"), converts detections to pitch coordinates with the provided 
 must be within 1.5 m of it (median), with 80% within 3 m. If the check fails, `run.py` ignores
 the result and the submission is unchanged.
 
-It is off unless you run it, and it needs the tactical video and extra libraries:
+It is off unless you run it, and it needs the tactical video and extra libraries. For the GPU
+version on Windows, install a CUDA build of PyTorch first; `requirements-video.txt` explains how.
 
 ```bash
 pip install -r requirements-video.txt
 python scripts/detect_ball_video.py --limit 300   # 5-10 minute trial, never used by run.py
-python scripts/detect_ball_video.py               # full run: ~4 h on a CPU, much less on a GPU
+python scripts/detect_ball_video.py               # full run: ~4 h on a CPU (reproducible)
+python scripts/detect_ball_video.py --gpu         # or on an NVIDIA GPU: ~10-20 min
 python run.py                                     # prints "+ video ball" if the check PASSED
 ```
 

@@ -2,6 +2,7 @@
 
     pip install -r requirements-video.txt
     python scripts/detect_ball_video.py              # CPU, deterministic; a few hours
+    python scripts/detect_ball_video.py --gpu        # NVIDIA GPU: minutes, not hours
     python scripts/detect_ball_video.py --limit 2000 # quick trial on the first 2000 wanted frames
     python run.py                                    # uses the result only if it PASSED
 
@@ -49,9 +50,15 @@ def fused_ball(use_broadcast=True):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--device", default="cpu",
-                    help="cpu (default, reproducible) or e.g. cuda:0 (much faster; results can "
-                         "differ slightly from a CPU run)")
+    ap.add_argument("--gpu", action="store_true",
+                    help="use the NVIDIA GPU: same as --device auto --batch-frames 8 with half "
+                         "precision. Much faster; results can differ slightly from a CPU run")
+    ap.add_argument("--device", default=None,
+                    help="cpu (default, reproducible), cuda:0, or auto (GPU if available)")
+    ap.add_argument("--batch-frames", type=int, default=None,
+                    help="frames per model call (default 1 on CPU, 8 with --gpu)")
+    ap.add_argument("--no-half", action="store_true",
+                    help="keep full precision on the GPU (slower, closer to a CPU run)")
     ap.add_argument("--threads", type=int, default=None,
                     help="CPU threads for inference (default {}: deterministic)".format(
                         C.VIDEO_TORCH_THREADS))
@@ -62,6 +69,9 @@ def main():
     a = ap.parse_args()
     if a.threads:
         C.VIDEO_TORCH_THREADS = a.threads
+    device = a.device or ("auto" if a.gpu else "cpu")
+    batch_frames = a.batch_frames or (8 if a.gpu else 1)
+    half = a.gpu and not a.no_half
 
     paths = games.asset_paths()
     video_path = paths["video"]
@@ -82,7 +92,16 @@ def main():
     print("frames to scan: {} missing-ball targets (every {}th) + {} check frames".format(
         len(targets), C.VIDEO_STEP, len(checks)))
 
-    detector = V.YoloBallDetector(device=a.device)
+    detector = V.YoloBallDetector(device=device, half=half, batch_frames=batch_frames)
+    print("detector: {} on {}{}, {} frame(s) per batch".format(
+        C.VIDEO_WEIGHTS, detector.device, " (half precision)" if detector.half else "",
+        detector.batch_frames))
+    if detector.gpu:
+        import torch
+        print("  GPU: {}".format(torch.cuda.get_device_name(0)))
+    elif a.gpu:
+        print("  WARNING: --gpu given but PyTorch sees no CUDA GPU, so this runs on the CPU "
+              "(slow).\n  Check: python -c \"import torch; print(torch.cuda.is_available())\"")
     start = time.time()
 
     def progress(done, total, frame):
@@ -111,7 +130,9 @@ def main():
         stats["passed"] = False  # a trial never feeds the submission
     import torch
     import ultralytics
-    meta = {"device": a.device, "threads": C.VIDEO_TORCH_THREADS, "weights": C.VIDEO_WEIGHTS,
+    meta = {"device": detector.device, "half_precision": detector.half,
+            "batch_frames": detector.batch_frames,
+            "threads": C.VIDEO_TORCH_THREADS, "weights": C.VIDEO_WEIGHTS,
             "torch": torch.__version__, "ultralytics": ultralytics.__version__,
             "python": platform.python_version(), "platform": platform.platform(),
             "seconds": round(time.time() - t0)}

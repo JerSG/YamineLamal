@@ -63,40 +63,76 @@ def model_path():
     return os.path.join(folder, C.VIDEO_WEIGHTS)
 
 
+def resolve_device(device):
+    """'auto' -> 'cuda:0' when an NVIDIA GPU is usable, else 'cpu'. Anything else unchanged."""
+    if device != "auto":
+        return device
+    import torch
+    return "cuda:0" if torch.cuda.is_available() else "cpu"
+
+
 class YoloBallDetector(object):
-    """Best 'sports ball' detection per frame, via tiled YOLO inference on the CPU."""
+    """Best 'sports ball' detection per frame, via tiled YOLO inference.
+
+    CPU (default): single-threaded, full precision, one frame per call -- the reproducible mode.
+    GPU: several frames' tiles per call (batch_frames) and half precision (half=True), which is
+    where a GPU gets its speed. Results can differ very slightly from a CPU run.
+    """
 
     COCO_SPORTS_BALL = 32
 
-    def __init__(self, weights=None, device="cpu", conf=None):
+    def __init__(self, weights=None, device="cpu", conf=None, half=False, batch_frames=1):
         import torch
         from ultralytics import YOLO
+        self.device = resolve_device(device)
+        self.gpu = self.device.startswith("cuda")
+        if self.gpu and not torch.cuda.is_available():
+            raise RuntimeError(
+                "device {} requested but PyTorch sees no CUDA GPU. Check with:\n"
+                "  python -c \"import torch; print(torch.cuda.is_available())\"\n"
+                "and install a CUDA build of PyTorch (see requirements-video.txt)."
+                .format(self.device))
         torch.use_deterministic_algorithms(True, warn_only=True)
-        if device == "cpu":
+        if self.gpu:
+            torch.backends.cudnn.benchmark = False
+            torch.backends.cudnn.deterministic = True
+        else:
             torch.set_num_threads(C.VIDEO_TORCH_THREADS)
         self.model = YOLO(weights or model_path())
-        self.device = device
         self.conf = C.VIDEO_MIN_CONF if conf is None else conf
+        self.half = bool(half and self.gpu)  # half precision is a GPU feature
+        self.batch_frames = max(1, int(batch_frames))
 
     def detect(self, frame_bgr):
         """(x_px, y_px, confidence) of the most confident ball, or None."""
-        h, w = frame_bgr.shape[:2]
+        return self.detect_many([frame_bgr])[0]
+
+    def detect_many(self, frames_bgr):
+        """detect() for several frames in one model call (all their tiles in one batch)."""
+        if not frames_bgr:
+            return []
+        h, w = frames_bgr[0].shape[:2]
         corners = tiles(w, h)
-        batch = [frame_bgr[y:y + TILE, x:x + TILE] for x, y in corners]
+        batch = [img[y:y + TILE, x:x + TILE] for img in frames_bgr for x, y in corners]
+        extra = {"quantize": 16} if self.half else {}  # Ultralytics 8.4: fp16 on the GPU
         results = self.model.predict(batch, imgsz=TILE, conf=self.conf, device=self.device,
-                                     classes=[self.COCO_SPORTS_BALL], verbose=False)
-        best = None
-        for (x0, y0), r in zip(corners, results):
-            if r.boxes is None or len(r.boxes) == 0:
-                continue
-            xywh = r.boxes.xywh.cpu().numpy()
-            conf = r.boxes.conf.cpu().numpy()
-            for (cx, cy, _, _), c in zip(xywh, conf):
-                c = round(float(c), 3)
-                cand = (round(float(cx) + x0, 1), round(float(cy) + y0, 1), c)
-                if best is None or c > best[2]:
-                    best = cand
-        return best
+                                     classes=[self.COCO_SPORTS_BALL], verbose=False, **extra)
+        out = []
+        per = len(corners)
+        for i in range(len(frames_bgr)):
+            best = None
+            for (x0, y0), r in zip(corners, results[i * per:(i + 1) * per]):
+                if r.boxes is None or len(r.boxes) == 0:
+                    continue
+                xywh = r.boxes.xywh.float().cpu().numpy()
+                conf = r.boxes.conf.float().cpu().numpy()
+                for (cx, cy, _, _), c in zip(xywh, conf):
+                    c = round(float(c), 3)
+                    cand = (round(float(cx) + x0, 1), round(float(cy) + y0, 1), c)
+                    if best is None or c > best[2]:
+                        best = cand
+            out.append(best)
+        return out
 
 
 def pixels_to_pitch(H, x_px, y_px):
@@ -143,24 +179,43 @@ def scan_video(video_path, frames_wanted, detector, n_frames_expected, progress=
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise IOError("cannot open video: {}".format(video_path))
+    batch_size = getattr(detector, "batch_frames", 1)
+    pending_frames, pending_images = [], []
     frame = 0
     done = 0
+    reported = 0
+
+    def flush():
+        nonlocal done, reported
+        if not pending_frames:
+            return
+        for f, det in zip(pending_frames, detector.detect_many(pending_images)):
+            out[f] = det
+        done += len(pending_frames)
+        del pending_frames[:], pending_images[:]
+        if progress and done - reported >= 500:
+            reported = done
+            progress(done, len(wanted), frame)
+
     try:
         while True:
             if frame in wanted:
                 ok, image = cap.read()
                 if not ok:
                     break
-                out[frame] = detector.detect(image)
-                done += 1
-                if progress and done % 500 == 0:
-                    progress(done, len(wanted), frame)
+                pending_frames.append(frame)
+                pending_images.append(image)
+                if len(pending_frames) >= batch_size:
+                    flush()
                 if stop_after and done >= stop_after:
                     return out
             else:
                 if not cap.grab():
                     break
             frame += 1
+        flush()
+        if stop_after and done >= stop_after:
+            return out
     finally:
         cap.release()
     if frame != n_frames_expected:
