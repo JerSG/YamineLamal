@@ -1,0 +1,6 @@
+# Pinned to the versions the submission was generated and verified with (Python 3.13).
+# The pipeline uses numpy only; pandas is needed by the organisers' scorer in evaluation/.
+numpy==2.5.3
+pandas==3.0.5
+# tests only
+pytest==9.2.0

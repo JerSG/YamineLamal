@@ -1,0 +1,26 @@
+# -- match data: licensed for the competition only, never committed -----------------------------
+data/*
+!data/README.md
+*.mp4
+
+# -- generated submissions: a full set of labels for the match ---------------------------------
+# The possession file is uploaded through the submission form, not published in the repository.
+submission/*
+!submission/README.md
+evaluation/results/*.csv
+!evaluation/results/baseline_*.csv
+evaluation/reports/
+evaluation/scoreboard.csv
+
+# -- private ground truth (never in our hands, listed as insurance) ----------------------------
+*_possession_gt.csv
+*_possession_gt_meta.json
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.DS_Store
+.idea/
+.vscode/
