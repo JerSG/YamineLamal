@@ -1,7 +1,7 @@
 ---
 title: "Ball possession from automatic tracking: a self-calibrating hidden Markov model"
 subtitle: "More than a Hack 2027, Phase 1: technical document"
-author: "TEAM_NAME"
+author: "YamineLamal"
 date: "November 2026"
 ---
 
@@ -249,8 +249,8 @@ provided tracking and tagging of this game.
 # Python 3.12+ (the pinned numpy 2.5.3 requires it); verified on 3.13
 pip install -r requirements.txt               # numpy, pandas (scorer), pytest (tests)
 # unpack the match data into data/ (see data/README.md)
-python run.py --team TEAM_NAME                # ~1 minute; deterministic
-python evaluation/validate_submission.py submission/TEAM_NAME.csv
+python run.py --team YamineLamal                # ~1 minute; deterministic
+python evaluation/validate_submission.py submission/YamineLamal.csv
 python -m pytest -q tests                     # synthetic-data tests, no match data needed
 python scripts/sensitivity.py                 # optional: the robustness table above (~40 min)
 ```

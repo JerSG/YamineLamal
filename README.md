@@ -1,6 +1,6 @@
-# Ball possession from automatic tracking: a self-calibrating HMM
+# Ball possession from automatic tracking: a self-calibrating HMM (team YamineLamal)
 
-Team submission for **More than a Hack 2027, Phase 1: Ball Possession**
+Team **YamineLamal** submission for **More than a Hack 2027, Phase 1: Ball Possession**
 (Metrica Sports · FC Barcelona · Mobile World Capital Barcelona).
 
 For every frame of FC Barcelona vs Athletic Club, the pipeline outputs `H`, `A` or `D`. It uses
@@ -34,22 +34,22 @@ data/tactical/BAR-ATH_tactical_homography.csv     (optional, used by default)
 ```
 
 ```bash
-python run.py --team TEAM_NAME
+python run.py --team YamineLamal
 ```
 
-This takes about a minute on a laptop and writes `submission/TEAM_NAME.csv` and
-`submission/TEAM_NAME_report.json`. The run is deterministic: the same data and the same command
+This takes about a minute on a laptop and writes `submission/YamineLamal.csv` and
+`submission/YamineLamal_report.json`. The run is deterministic: the same data and the same command
 give a byte-identical file.
 
 ```bash
-python evaluation/validate_submission.py submission/TEAM_NAME.csv
+python evaluation/validate_submission.py submission/YamineLamal.csv
 ```
 
 Optionally, score it on the public 5-minute window. That window is a pipeline check, not a
 leaderboard:
 
 ```bash
-cp submission/TEAM_NAME.csv evaluation/results/
+cp submission/YamineLamal.csv evaluation/results/
 python evaluation/run_evaluation.py
 ```
 
@@ -78,7 +78,7 @@ scripts/sensitivity.py      unsupervised robustness check: how much the output m
 tests/                      synthetic-data tests (no match data needed): python -m pytest -q
 evaluation/                 the organisers' scorer, unchanged (MIT), with the public 5-min GT
 games.py                    the organisers' per-match constants, unchanged (MIT)
-docs/TECHNICAL_REPORT.md    the technical document
+docs/TECHNICAL_REPORT.md    the technical document (rendered: docs/YamineLamal.pdf)
 data/                       the match data goes here, gitignored
 submission/                 generated output, gitignored
 ```

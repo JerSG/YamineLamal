@@ -1,8 +1,8 @@
 """Regenerate the submission from the provided data.
 
-    python run.py --team TEAM_NAME
+    python run.py --team YamineLamal
 
-writes submission/TEAM_NAME.csv (the possession file) and submission/TEAM_NAME_report.json (the
+writes submission/YamineLamal.csv (the possession file) and submission/YamineLamal_report.json (the
 mode used, the learned emission tables and output statistics). Deterministic: same data, same
 command, byte-identical file.
 """
@@ -17,7 +17,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__.splitlines()[1])
-    p.add_argument("--team", default="TEAM_NAME", help="names the output files (SUBMISSION.md)")
+    p.add_argument("--team", default="YamineLamal", help="names the output files (SUBMISSION.md)")
     p.add_argument("--mode", choices=("auto", "full", "basic"), default="auto",
                    help="full = raw tracking, basic = published nearest-player signal; "
                         "auto picks full when data/tactical/*_atd.txt exists")
