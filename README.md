@@ -16,7 +16,8 @@ homography┘        per frame              + self-consistent evidence scale
 
 ## Reproduce the submission
 
-**Python 3.8+** (verified on 3.13). numpy is the only runtime dependency of the pipeline.
+**Python 3.12 or newer** (verified on 3.13): the pinned numpy 2.5.3 needs 3.12+. numpy is the only
+runtime dependency of the pipeline; pandas is for the organisers' scorer.
 
 ```bash
 pip install -r requirements.txt

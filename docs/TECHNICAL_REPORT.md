@@ -208,8 +208,11 @@ Every perturbation leaves at least 96.6% of graded frames unchanged. The only pr
 
 # 7. Use of the public ground truth
 
-The public 5 minutes were used to (1) confirm the file format and frame alignment, and (2) as a
-smoke test while debugging. Each structural fix in 4.3 was triggered by inspecting the *learned
+The public 5 minutes were used to (1) confirm the file format and frame alignment, (2) at the
+very start, to look at what the labels mean, as CHALLENGE.md asks ("the ground truth is where you
+can see it"): we printed its 21 segments next to the raw nearest-player signal and the tags,
+which showed that a missing ball does not imply a dead ball and that restarts sit at varying
+points inside set-piece windows, and (3) as a smoke test while debugging. Each structural fix in 4.3 was triggered by inspecting the *learned
 tables*, which were visibly wrong (D meaning "no tag", walking-speed bins meaning nothing), and
 the public score was then checked to confirm the pipeline was no longer broken. No hyperparameter
 was searched against it. Every constant in `possession/config.py` is tagged with its source
@@ -243,6 +246,7 @@ provided tracking and tagging of this game.
 # 10. Reproduction
 
 ```bash
+# Python 3.12+ (the pinned numpy 2.5.3 requires it); verified on 3.13
 pip install -r requirements.txt               # numpy, pandas (scorer), pytest (tests)
 # unpack the match data into data/ (see data/README.md)
 python run.py --team TEAM_NAME                # ~1 minute; deterministic
