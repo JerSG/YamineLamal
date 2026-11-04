@@ -173,6 +173,12 @@ def scan_video(video_path, frames_wanted, detector, n_frames_expected, progress=
     reference count (FAQ: do not pad or trim to fit). stop_after (trial runs) stops early and
     skips the frame-count check.
     """
+    # Decoding runs in a background thread, strictly in order, while the detector works on the
+    # previous batch: on a GPU the detector would otherwise sit idle waiting for the decoder.
+    # Frame numbering is the decoder's own count, exactly as in a plain sequential loop, so the
+    # result does not depend on timing.
+    import queue
+    import threading
     import cv2
     wanted = set(int(f) for f in frames_wanted)
     out = {}
@@ -180,10 +186,34 @@ def scan_video(video_path, frames_wanted, detector, n_frames_expected, progress=
     if not cap.isOpened():
         raise IOError("cannot open video: {}".format(video_path))
     batch_size = getattr(detector, "batch_frames", 1)
+    frames_q = queue.Queue(maxsize=max(4, 4 * batch_size))
+    stop = threading.Event()
+    END = object()
+    decoded = {"count": 0, "error": None}
+
+    def decode():
+        frame = 0
+        try:
+            while not stop.is_set():
+                if frame in wanted:
+                    ok, image = cap.read()
+                    if not ok:
+                        break
+                    frames_q.put((frame, image))
+                elif not cap.grab():
+                    break
+                frame += 1
+        except Exception as exc:  # surfaced in the main thread below
+            decoded["error"] = exc
+        finally:
+            decoded["count"] = frame
+            frames_q.put(END)
+
+    worker = threading.Thread(target=decode, daemon=True)
+    worker.start()
     pending_frames, pending_images = [], []
-    frame = 0
-    done = 0
-    reported = 0
+    done = reported = 0
+    stopped_early = False
 
     def flush():
         nonlocal done, reported
@@ -195,32 +225,38 @@ def scan_video(video_path, frames_wanted, detector, n_frames_expected, progress=
         del pending_frames[:], pending_images[:]
         if progress and done - reported >= 500:
             reported = done
-            progress(done, len(wanted), frame)
+            progress(done, len(wanted), max(out) if out else 0)
 
     try:
         while True:
-            if frame in wanted:
-                ok, image = cap.read()
-                if not ok:
-                    break
-                pending_frames.append(frame)
-                pending_images.append(image)
-                if len(pending_frames) >= batch_size:
-                    flush()
-                if stop_after and done >= stop_after:
-                    return out
-            else:
-                if not cap.grab():
-                    break
-            frame += 1
+            item = frames_q.get()
+            if item is END:
+                break
+            pending_frames.append(item[0])
+            pending_images.append(item[1])
+            if len(pending_frames) >= batch_size:
+                flush()
+            if stop_after and done >= stop_after:
+                stopped_early = True
+                break
         flush()
-        if stop_after and done >= stop_after:
-            return out
     finally:
+        stop.set()
+        while worker.is_alive():  # unblock a decoder waiting on a full queue
+            try:
+                frames_q.get_nowait()
+            except queue.Empty:
+                pass
+            worker.join(timeout=0.05)
         cap.release()
-    if frame != n_frames_expected:
+    if decoded["error"] is not None:
+        raise decoded["error"]
+    if stopped_early or stop_after:
+        return out
+    if decoded["count"] != n_frames_expected:
         raise ValueError("decoded {} frames, expected {}: this is not the reference decode "
-                         "(see FAQ.md); refusing to continue".format(frame, n_frames_expected))
+                         "(see FAQ.md); refusing to continue".format(decoded["count"],
+                                                                     n_frames_expected))
     return out
 
 
@@ -322,25 +358,43 @@ def interpolate(points, n_frames, pitch):
 # ------------------------------------------------------------------------------------------------
 # files under data/derived/ (gitignored: derived from the match data, never published)
 # ------------------------------------------------------------------------------------------------
+def _sha256(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def write_outputs(folder, points, stats, meta):
+    """video_ball.csv plus video_ball_check.json, which records the CSV's SHA-256 so that
+    run.py can prove it is using exactly these detections (frozen intermediate file)."""
     os.makedirs(folder, exist_ok=True)
-    with open(os.path.join(folder, "video_ball.csv"), "w", newline="\n") as h:
+    csv_path = os.path.join(folder, "video_ball.csv")
+    with open(csv_path, "w", newline="\n") as h:
         h.write("frame,x,y,conf\n")
         for f in sorted(points):
             x, y, c = points[f]
             h.write("{},{:.5f},{:.5f},{:.3f}\n".format(f, x, y, c))
+    record = dict(stats, **meta)
+    record["detections_sha256"] = _sha256(csv_path)
     with open(os.path.join(folder, "video_ball_check.json"), "w") as h:
-        json.dump(dict(stats, **meta), h, indent=2, sort_keys=True)
+        json.dump(record, h, indent=2, sort_keys=True)
 
 
 def read_outputs(folder):
-    """(points, stats) or (None, None) when the video step has not been run."""
+    """(points, stats) or (None, None) when the video step has not been run. stats gains
+    "fingerprint_ok": whether video_ball.csv still matches the SHA-256 recorded with it."""
     csv_path = os.path.join(folder, "video_ball.csv")
     json_path = os.path.join(folder, "video_ball_check.json")
     if not (os.path.isfile(csv_path) and os.path.isfile(json_path)):
         return None, None
     with open(json_path) as h:
         stats = json.load(h)
+    actual = _sha256(csv_path)
+    stats["detections_sha256_actual"] = actual
+    stats["fingerprint_ok"] = actual == stats.get("detections_sha256")
     points = {}
     with open(csv_path) as h:
         next(h)

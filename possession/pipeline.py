@@ -166,6 +166,10 @@ def video_hook(inner, verbose=True):
     points, stats = V.read_outputs(os.path.join(ROOT, "data", "derived"))
     if points is None:
         return inner
+    if not stats.get("fingerprint_ok"):
+        print("video ball detections NOT used: data/derived/video_ball.csv does not match the "
+              "SHA-256 recorded in video_ball_check.json (file changed or incomplete).")
+        return inner
     if not stats.get("passed") or stats.get("trial_run"):
         if verbose:
             print("video ball detections present but not used (check {}).".format(
@@ -180,9 +184,11 @@ def video_hook(inner, verbose=True):
         info["video"] = {"frames_filled": int(gap.sum()),
                          "check_median_error_m": stats.get("median_error_m"),
                          "check_share_within_3m": stats.get("share_within_3m")}
+        info["video"]["detections_sha256"] = stats.get("detections_sha256")
         if verbose:
-            print("  video ball: filled {} more frames (check: median {:.2f} m)".format(
-                int(gap.sum()), stats.get("median_error_m")))
+            print("  video ball: filled {} more frames (check: median {:.2f} m); detections "
+                  "SHA-256 {}...".format(int(gap.sum()), stats.get("median_error_m"),
+                                         str(stats.get("detections_sha256"))[:16]))
         return filled, info
     return hook
 

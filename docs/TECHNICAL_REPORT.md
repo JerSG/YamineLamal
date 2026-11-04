@@ -242,8 +242,13 @@ optional step (`scripts/detect_ball_video.py`, `possession/video.py`):
   with at least 80% within 3 m. Otherwise the pipeline ignores the detections. They only ever
   fill missing balls and never override a tracked one.
 
-Inference is CPU-only and single-threaded by default, with deterministic settings and rounded
-outputs, so that it reproduces across machines. **The submitted file does not use this step.**
+Inference runs on an NVIDIA GPU (`--gpu`, full precision, deterministic cuDNN/cuBLAS, fixed
+batches; ~10-20 minutes) or a CPU (~4 hours). Video decoding runs in a background thread, in strict
+frame order. **Exact reproducibility** comes from freezing the detections as an intermediate file
+whose SHA-256 is recorded and checked by `run.py`: from that file, the submission is regenerated
+byte for byte on any machine. Re-running the detector repeats exactly on the same machine and
+settings (we verified this, including across different batch sizes); `--verify` measures
+agreement on other hardware. **The submitted file does not use this step.**
 We could not run it in our development environment, which never held the match video (the
 competition terms forbid sharing it with a hosted AI service). We tested it end to end on
 synthetic video, where its geometry is accurate to 0.03 m. Running it on the real video is the

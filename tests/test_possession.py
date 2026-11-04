@@ -305,6 +305,21 @@ def test_strict_external_model_trains_and_applies_on_synthetic_data():
     assert np.allclose(w, [1 / 3, 1 / 3, 1 / 3, 1, 0.5, 0.5])
 
 
+def test_video_detections_fingerprint_blocks_tampered_files():
+    """The frozen detections file is used only if it matches the SHA-256 recorded with it."""
+    import tempfile
+    from possession import video as V
+    pts = {100: (0.5, 0.5, 0.9), 105: (0.51, 0.5, 0.8)}
+    with tempfile.TemporaryDirectory() as d:
+        V.write_outputs(d, pts, {"passed": True}, {})
+        points, stats = V.read_outputs(d)
+        assert stats["fingerprint_ok"] and points == pts
+        with open(os.path.join(d, "video_ball.csv"), "a") as h:
+            h.write("110,0.52000,0.50000,0.700\n")      # one extra line
+        points, stats = V.read_outputs(d)
+        assert not stats["fingerprint_ok"]
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

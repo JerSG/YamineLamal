@@ -113,15 +113,25 @@ version on Windows, install a CUDA build of PyTorch first; `requirements-video.t
 
 ```bash
 pip install -r requirements-video.txt
-python scripts/detect_ball_video.py --limit 300   # 5-10 minute trial, never used by run.py
-python scripts/detect_ball_video.py               # full run: ~4 h on a CPU (reproducible)
-python scripts/detect_ball_video.py --gpu         # or on an NVIDIA GPU: ~10-20 min
-python run.py                                     # prints "+ video ball" if the check PASSED
+python scripts/detect_ball_video.py --gpu --limit 300   # 1-2 minute trial, never used by run.py
+python scripts/detect_ball_video.py --gpu               # full run on an NVIDIA GPU: ~10-20 min
+python scripts/detect_ball_video.py --verify 300        # re-detect 300 frames, compare exactly
+python run.py                                           # prints "+ video ball" if it PASSED
 ```
 
-The detections are written to `data/derived/` and the model to `data/models/`, both gitignored:
-they are derived from the match data and must not be published. The summary the script prints
-contains only aggregate numbers.
+Without a GPU, drop `--gpu`: the same run takes ~4 h on a CPU. `--fast` adds half precision on the
+GPU (about 2x faster, slightly less repeatable across machines).
+
+**Exact reproducibility.** The detections are a frozen intermediate file (`data/derived/
+video_ball.csv`), and its SHA-256 is recorded in `video_ball_check.json`. `run.py` refuses a file
+that does not match. Given that file, `run.py` produces exactly the same submission on any machine,
+without a GPU. The GPU run itself uses full precision, deterministic cuDNN/cuBLAS and fixed batch
+sizes, so it repeats exactly on the same machine. On different hardware, `--verify` reports how
+many detections come out identical. The folder is derived from the match video, so it is given to
+the organisers directly rather than published in this repository.
+
+The detections are written to `data/derived/` and the model to `data/models/`, both gitignored.
+The summaries the script prints contain only aggregate numbers.
 
 ## Repository layout
 
