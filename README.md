@@ -73,6 +73,32 @@ Broadcast fusion switches on automatically when the three broadcast files are pr
 submitted file was generated with the plain command above and all seven files: `mode: full +
 broadcast fusion`.
 
+## Strict-external mode (nothing learned from the competition match)
+
+The organisers' rules clarification says that anything trained or tuned must use **external data
+only**. The default model learns its tables by unsupervised EM on this match's own tracking, with
+no labels, ground truth or video. In case that counts as training on provided data, a fully
+external alternative is included:
+
+```bash
+git clone https://github.com/metrica-sports/sample-data external/metrica-sample-data
+python scripts/train_external.py          # ~1 min; writes models/external_params.json (committed)
+python run.py --strict-external           # applies it, frozen, to the match (~10 s + broadcast)
+```
+
+* **Learned on other matches, then frozen:** the tracking features' emission tables, the
+  transition probabilities and the evidence scale. They come from Metrica's three public sample
+  games (labels derived from their event data); the scale maximises the organisers' own spellF1
+  there.
+* **Fixed, not learned:** feature weights (one observation per run of identical values), the Smart
+  Tagging tables, and the kickoff rule (dead only before the kickoff tag opens).
+* **Dropped:** the camera-zone feature (no external equivalent).
+* **Leave-one-game-out on the external games:** spellF1 0.47 / 0.48 / 0.49 against their
+  event-derived labels.
+
+It writes to the same `submission/<team>.csv`. Keep a copy of your current file if you want to
+compare.
+
 ## Optional: detect the ball in the video
 
 The ball is still untracked on ~59,000 graded frames after the broadcast fill. An optional step
@@ -108,9 +134,13 @@ possession/
   hmm.py                    tied 3-state HMM, tempered EM, Viterbi, evidence-scale calibration
   broadcast.py              broadcast-to-tactical alignment (shots, offset search, checks) and ball fill
   video.py                  optional ball detection in the tactical video, with its own acceptance check
+  external.py               readers + event-derived labels for the public Metrica sample games
+  strict.py                 strict-external model: train on external games, apply frozen
   pipeline.py               data in, possession file out
 scripts/sensitivity.py      unsupervised robustness check: how much the output moves per prior
 scripts/detect_ball_video.py  the optional video step (see above)
+scripts/train_external.py   trains the strict-external model on the public sample games
+models/external_params.json the strict-external model's frozen parameters
 requirements-video.txt      extra, pinned libraries for the video step only
 tests/                      synthetic-data tests (no match data needed): python -m pytest -q
 evaluation/                 the organisers' scorer, unchanged (MIT), with the public 5-min GT

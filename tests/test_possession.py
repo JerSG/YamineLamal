@@ -251,6 +251,60 @@ def test_video_addon_geometry_filters_and_safety():
         os.path.join(ROOT, "data", "derived"))
 
 
+def test_strict_external_model_trains_and_applies_on_synthetic_data():
+    """Strict mode: tables/transitions from labelled 'external' games, scale tuned there, then
+    applied frozen to a new 'match' (synthetic data only, no competition data)."""
+    from possession import strict as ST
+    rng = np.random.RandomState(5)
+
+    def game(seed, T=6000):
+        r = np.random.RandomState(seed)
+        lab = np.zeros(T, dtype=np.int8)
+        t, team = 0, 0
+        while t < T:
+            n = r.randint(150, 450)
+            lab[t:t + n] = team
+            t += n
+            if r.rand() < 0.3:
+                m = r.randint(200, 500)
+                lab[t:t + m] = 2
+                t += m
+            team = r.randint(0, 2) if lab[min(t, T) - 1] == 2 else 1 - team
+        lab = lab[:T]
+        players = np.full((T, 4, 3), np.nan, dtype=np.float32)
+        base = r.uniform(0.3, 0.7, (4, 2))
+        drift = np.cumsum(r.normal(0, 0.0008, (T, 4, 2)) * np.where(lab == 2, 0.2, 1.5)[:, None, None], 0)
+        players[..., :2] = np.clip(base + drift, 0.02, 0.98)
+        ball = np.full((T, 3), np.nan, dtype=np.float32)
+        owner = np.where(lab == 1, 2, 0)
+        ball[:, :2] = players[np.arange(T), owner, :2] + 0.004
+        ball[r.rand(T) < 0.35] = np.nan
+        return players, ball, lab
+
+    slot_team = np.array([0, 0, 1, 1], dtype=np.int8)
+    pitch = (105.0, 68.0)
+    ext = [game(s) for s in (1, 2)]
+    feats = [ST.tracking_features(p, b, slot_team, pitch) for p, b, _ in ext]
+    labs = [lab for _, _, lab in ext]
+    tables = ST.fit_tables(feats, labs)
+    trans, stats = ST.fit_transitions(labs)
+    assert 5 < stats["mean_alive_spell_s"] < 30
+    scale, curve = ST.tune_scale(feats, labs, tables, trans, grid=(0.5, 2.0, 8.0))
+    params = {"features": {f.name: {"values": f.values, "table": t.tolist()}
+                           for f, t in zip(feats[0], tables)},
+              "transitions": trans.tolist(), "scale": scale}
+    p, b, lab = game(9)
+    blocks = [(0, len(lab))]
+    events = [{"code": "SET PIECES", "type": "kick off (start)", "team": None, "start": 100,
+               "end": 225}]
+    path, model, forced = ST.apply(params, p, b, slot_team, events, len(lab), blocks, pitch)
+    assert forced[:100].all() and not forced[100:].any() and (path[:100] == 2).all()
+    assert np.mean(path[100:] == lab[100:]) > 0.6     # far above chance on an unseen 'match'
+    # weights are a fixed local rule: one observation per run of identical codes
+    w = ST.run_weights(np.array([0, 0, 0, 1, 2, 2]), [(0, 6)])
+    assert np.allclose(w, [1 / 3, 1 / 3, 1 / 3, 1, 0.5, 0.5])
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

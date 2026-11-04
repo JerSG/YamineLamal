@@ -187,6 +187,64 @@ def video_hook(inner, verbose=True):
     return hook
 
 
+STRICT_PARAMS = os.path.join(ROOT, "models", "external_params.json")
+
+
+def run_strict(out_path=None, report_path=None, verbose=True, data_dir=None, use_broadcast=True,
+               use_video=True, params_path=None):
+    """The strict-external model (possession/strict.py): parameters learned on other matches,
+    applied frozen. Same inputs and ball fusion as the default model; no fitting on this match."""
+    from . import strict as ST
+    params = ST.load(params_path or STRICT_PARAMS)
+    paths = games.asset_paths(data_dir=data_dir)
+    n_frames = games.source_frames("tactical")
+    for k in ("atd_meta", "atd_raw", "smart_tagging"):
+        if not S.file_exists(paths[k]):
+            raise IOError("strict-external mode needs {}".format(paths[k]))
+    hook = broadcast_hook(data_dir, verbose) if use_broadcast else None
+    fusion = ["broadcast fusion"] if hook is not None else []
+    if use_video:
+        with_video = video_hook(hook, verbose)
+        if with_video is not hook:
+            fusion.append("video ball")
+        hook = with_video
+    if verbose:
+        print("mode: strict-external (parameters from {}){}".format(
+            os.path.relpath(params_path or STRICT_PARAMS, ROOT),
+            "".join(" + " + f for f in fusion)))
+    meta = S.read_atd_meta(paths["atd_meta"])
+    if verbose:
+        print("reading raw tracking {} ...".format(os.path.basename(paths["atd_raw"])))
+    players, ball = S.read_atd(paths["atd_raw"], len(meta["slot_team"]), n_frames)
+    info = {"mode": "strict-external", "ball_fusion": fusion}
+    if hook is not None:
+        ball, hook_info = hook(players, ball, meta)
+        info.update(hook_info)
+    events = S.read_smart_tagging(paths["smart_tagging"], C.FPS)
+    halves = graded_blocks()
+    blocks = [(s, e) for _, s, e in halves]
+    path, model, forced = ST.apply(params, players, ball, meta["slot_team"], events, n_frames,
+                                   blocks, games.GAMES[games.GAME]["pitch"])
+    labels = np.full(n_frames, "X", dtype="<U1")
+    graded = path >= 0
+    labels[graded] = STATE_LABELS[path[graded]]
+    stats = possession_stats(labels, blocks)
+    info.update(stats)
+    info["frames_forced_dead"] = int(forced.sum())
+    info["external_scale"] = params["scale"]
+    if verbose:
+        print("output: {possessions} possessions (mean {mean_possession_s:.1f} s), "
+              "{stoppages} stoppages; frames H {H} A {A} D {D}".format(**stats))
+    if out_path:
+        write_submission(out_path, labels)
+        if verbose:
+            print("wrote {}".format(out_path))
+    if report_path:
+        with open(report_path, "w") as handle:
+            json.dump(info, handle, indent=2, default=float)
+    return labels, info
+
+
 def run(mode="auto", out_path=None, use_camera=True, report_path=None, verbose=True,
         data_dir=None, ball_hook=None, use_broadcast=True, use_video=True):
     paths = games.asset_paths(data_dir=data_dir)

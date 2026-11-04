@@ -249,6 +249,32 @@ competition terms forbid sharing it with a hosted AI service). We tested it end 
 synthetic video, where its geometry is accurate to 0.03 m. Running it on the real video is the
 first thing we would do with more time, and it is designed to adopt itself only if it passes.
 
+## 4.9 Strict-external variant (`run.py --strict-external`)
+
+The organisers' rules clarification requires that anything trained or tuned uses external data
+only. The default model fits its emission tables by unsupervised EM on this match's own automatic
+tracking (never on labels, ground truth or video) and sets its evidence scale by
+self-consistency on the same data. In case that counts as training on provided data, the
+repository includes a variant in which **nothing is fitted to the competition match**:
+
+| component | default model | strict-external variant |
+|---|---|---|
+| tracking-feature emission tables | unsupervised EM on this match | supervised, on 3 external games (labels from their event data), then frozen |
+| transition probabilities | football priors | measured on the external games: mean possession 12.5 s, 24% ending in a stoppage, mean stoppage 22.7 s |
+| evidence scale | self-consistency on this match | chosen on the external games to maximise the organisers' spellF1: 2.8 |
+| feature weights | 1 / mean run length on this match | fixed local rule: each run of identical values counts as one observation |
+| Smart Tagging tables | partly EM-learned | fixed priors |
+| kickoff | dead until 85 frames into the tag (measured on this match) | dead until the tag opens |
+| camera zone | fixed tables | dropped (no external equivalent) |
+| ball fusion (broadcast, optional video) | as 4.7 / 4.8 | unchanged: nothing in them is learned |
+
+Player speeds are recomputed from positions in this variant, because the external games have no
+speed channel. **Generalisation across matches**, trained on two external games and tested on
+the third: spellF1 0.465 / 0.484 / 0.492 against the held-out game's event-derived labels,
+with the same scale chosen each time. Those labels follow event-data conventions, not the
+competition's corrected-tracking ground truth, so these numbers show that the method transfers
+between matches; they do not predict the competition score.
+
 # 5. Possession rules as implemented
 
 * **Ball alive or dead.** Dead where the evidence of a stoppage (walking players, ball still or
@@ -333,6 +359,14 @@ the thresholds (Section 6).
 this game or any other. Its parameters are either general football priors, which were not fitted
 or tuned to any labels (see Section 7 for the one look at the public window), or learned by
 unsupervised EM on the provided tracking and tagging of this game.
+
+**The strict-external variant (4.9), not used in this file,** is trained on Metrica Sports'
+public sample games 1-3 (https://github.com/metrica-sports/sample-data): three anonymised
+professional matches, about 2.4 hours of tracking at 25 fps, with event data collected manually by
+Metrica. Our labels are derived from those events mechanically (`possession/external.py`). The
+repository has no formal licence file; its README provides the data for the analytics community
+and asks public users to acknowledge the source, which we do here. None of it comes from the
+competition match.
 
 **The optional video step (4.8), not used in this file,** relies on a detector pre-trained by
 Ultralytics (YOLO11s) on the public **COCO** dataset: about 118,000 everyday images labelled by

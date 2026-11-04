@@ -140,3 +140,11 @@ VIDEO_MAX_INTERP_M = 8.0      # [model] ... and at most 8 m apart
 VIDEO_MIN_CHECK_DETECTIONS = 300
 VIDEO_MAX_MEDIAN_ERR_M = 1.5
 VIDEO_MIN_SHARE_WITHIN_3M = 0.80
+
+# -------------------------------------------------------------------------------------------------
+# Strict-external model (possession/strict.py): parameters learned on other matches only
+# -------------------------------------------------------------------------------------------------
+STRICT_EXTERNAL_PITCH = (105.0, 68.0)   # [data] Metrica sample games' pitch (their README)
+STRICT_SPEED_SMOOTH_FRAMES = 5          # [model] +/- 0.2 s smoothing of position-derived speed
+# [model] evidence scales tried on the external games; the best mean spellF1 there is kept
+STRICT_SCALE_GRID = (0.25, 0.35, 0.5, 0.7, 1.0, 1.4, 2.0, 2.8, 4.0, 5.6, 8.0)

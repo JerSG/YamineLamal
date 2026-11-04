@@ -26,3 +26,6 @@ venv/
 .DS_Store
 .idea/
 .vscode/
+
+# -- external training data (public Metrica sample games): cloned, not redistributed ------------
+external/

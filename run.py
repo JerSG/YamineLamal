@@ -22,6 +22,9 @@ if __name__ == "__main__":
                    help="full = raw tracking, basic = published nearest-player signal; "
                         "auto picks full when data/tactical/*_atd.txt exists")
     p.add_argument("--no-camera", action="store_true", help="ignore the tactical homography")
+    p.add_argument("--strict-external", action="store_true",
+                   help="parameters learned on other matches only (models/external_params.json), "
+                        "nothing fitted on the competition match")
     p.add_argument("--no-video", action="store_true",
                    help="ignore data/derived/video_ball.csv even if its check passed")
     p.add_argument("--no-broadcast", action="store_true",
@@ -34,6 +37,13 @@ if __name__ == "__main__":
     t0 = time.time()
     out = os.path.join(a.out_dir, "{}.csv".format(a.team))
     report = os.path.join(a.out_dir, "{}_report.json".format(a.team))
+    if a.strict_external:
+        from possession.pipeline import run_strict
+        run_strict(out_path=out, report_path=report, verbose=not a.quiet,
+                   use_broadcast=not a.no_broadcast, use_video=not a.no_video)
+        print("done in {:.0f} s.  Validate:  python evaluation/validate_submission.py {}".format(
+            time.time() - t0, os.path.relpath(out, ROOT)))
+        raise SystemExit(0)
     run(mode=a.mode, out_path=out, use_camera=not a.no_camera, report_path=report,
         verbose=not a.quiet, use_broadcast=not a.no_broadcast,
         use_video=not a.no_video)
