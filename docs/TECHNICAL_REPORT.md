@@ -58,8 +58,8 @@ leave-one-game-out results in Section 6 show the transfer.
 | Smart Tagging (competition) | input: open-play phases, set pieces, goals, kickoffs | fixed prior tables, nothing learned |
 | broadcast ATD + homography (competition) | input: ball positions for tactical frames without a ball (Section 4.6) | the homography is used only to find camera cuts |
 | Metrica sample games 1-3 (external) | **all training and tuning** | https://github.com/metrica-sports/sample-data |
-| tactical homography (competition) | only by the optional video step (4.7) | the camera-zone feature of our earlier model was dropped: no external equivalent |
-| tactical and broadcast videos | only by the optional video step (4.7) | not used for the submitted file |
+| tactical homography (competition) | **dropped** | the camera-zone feature of our earlier model was dropped: no external equivalent |
+| tactical and broadcast videos | **dropped** | see 4.7 |
 | public ground truth | **not used** for the submitted model | Section 7 |
 
 **Data checks.** The tactical ATD has 199,319 contiguous records. The organisers' own
@@ -171,17 +171,31 @@ second), and the exceptions are replays, each matched to the moment it shows. Wh
 ball is missing, an aligned broadcast ball fills it (**4,763** frames). An observed tactical ball
 is never overridden. Every threshold was fixed before the first alignment ran.
 
-## 4.7 Optional: ball detection in the video (not used in the submitted file)
+## 4.7 Considered and not used: ball detection in the video
 
-`scripts/detect_ball_video.py` runs a public detector pre-trained on external data (Ultralytics
-YOLO11s, COCO class "sports ball") on still-missing frames of the tactical video, in native
-resolution tiles. Detections are mapped to the pitch with the provided homography, filtered for
-impossible jumps, and **accepted only if they pass an automatic check** against the provided
-tracking on frames where the tracker sees the ball (median error ≤ 1.5 m, 80% within 3 m).
-Nothing is trained or tuned on the video. For exact reproducibility the detections are a frozen
-intermediate file whose SHA-256 is recorded and checked. GPU inference uses full precision and
-deterministic settings, and `--verify` measures agreement on re-runs. **The submitted file does
-not include this step.**
+We also built a ball detector for the video, using a public model pre-trained on external images.
+It could not be validated on the external games, which have no video. We kept only components
+whose benefit we could measure without the competition ground truth, so it is not part of the
+submission or the repository.
+
+## 4.8 Extensions tested and rejected
+
+Four extra tracking features were tested with the same leave-one-game-out protocol on the
+external games. Everything, including each feature's thresholds, was learned on two games and
+scored on the third (`scripts/test_extensions.py`, `possession/extensions.py`):
+
+| features | game 1 | game 2 | game 3 | mean |
+|---|---|---|---|---|
+| **submitted model** | 0.572 | 0.576 | 0.567 | **0.572** |
+| + pressure (players within 5 m of the ball) | 0.536 | 0.519 | 0.520 | 0.525 |
+| + territory (attacking third) | 0.574 | 0.559 | 0.570 | 0.568 |
+| + advance (team moving forward) | 0.570 | 0.578 | 0.573 | 0.574 |
+| + carrier (duration on the ball) | 0.563 | 0.561 | 0.561 | 0.561 |
+| + all four | 0.530 | 0.536 | 0.537 | 0.534 |
+
+None improves the held-out games reliably. Pressure and carrier largely repeat the ball feature,
+which double-counts the same evidence and fragments possessions. Advance's +0.002 is far below the
+noise of a three-game test. None was adopted.
 
 # 5. Possession rules as implemented
 
@@ -215,17 +229,23 @@ little. That matters, because the competition match cannot be used to check the 
 These labels follow event-data conventions, not the competition's corrected-tracking ground
 truth, so the numbers show transfer between matches; they do not predict the competition score.
 
-**Reproducibility.** The pipeline has no randomness. Two runs of `run.py` give byte-identical
-files (verified on a synthetic dataset in the exact competition layout, and to be confirmed on the
-match data by its SHA-256). Re-training on the external games gives a byte-identical
-`external_params.json` (verified).
+**Full match.** The submitted file has 350 possessions (mean 12.2 s) and 100 stoppages, with
+frames H 61,331 / A 45,004 / D 52,522 (33% of graded frames dead). Compared with the tactical
+tracking alone (334 possessions, 54,028 dead frames), broadcast fusion adds 16 possessions and
+reduces dead-ball frames by 1,506 (net). The dead share is within the external matches' range
+(26-35%), and the possession count is slightly above it (294-343).
+
+**Reproducibility.** The pipeline has no randomness. Two runs of `run.py` on the match data, in
+different Python environments, gave the identical result. The submitted file's SHA-256 is
+`6f0b718333586546f61ded5ddd58e2ca8b30307ba9975e69ec12972cb4c88a72`. Re-training on the external
+games gives a byte-identical `external_params.json`.
 
 # 7. Use of the provided data and the ground truth; development history
 
 * **Submitted model:** no parameter is fitted, tuned or calibrated on the competition match, its
   ground truth or its video. The match's tracking, Smart Tagging and broadcast data are inputs.
-  The broadcast alignment and the optional detector's acceptance test are automatic checks using
-  only the provided data, with thresholds fixed in advance.
+  The broadcast alignment is an automatic check using only the provided data, with thresholds fixed
+  in advance.
 * **Ground truth:** the submitted model was never scored on the public 5-minute window. Our only
   use of the public ground truth was early in development: looking at its segments to understand
   what counts as possession, and scoring an **earlier** model (below) as a smoke test.
@@ -246,7 +266,6 @@ match data by its SHA-256). Re-training on the external games gives a byte-ident
 | dataset | used for | source and labelling | size |
 |---|---|---|---|
 | **Metrica Sports sample games 1-3** | all training and tuning of the submitted model | public, https://github.com/metrica-sports/sample-data. Tracking by Metrica; event data collected manually by Metrica; our possession labels derived from those events by code | 3 matches, ~430,000 frames |
-| COCO (via Ultralytics YOLO11s) | only the optional video step, not in the submitted file | public image dataset labelled by human annotators; pre-training done by Ultralytics, none by us | ~118,000 images, none of this match |
 
 The Metrica sample repository has no formal licence file; its README provides the data for the
 analytics community and asks public users to acknowledge the source, which we do here. No data of
@@ -261,7 +280,8 @@ any kind from the competition match was labelled, by hand or otherwise, for trai
   ground truth (derived from corrected tracking), so the external scores do not predict ours.
 * **Smart Tagging is not learned.** Its tables are fixed priors, since no external game has tags.
 * **Turnovers while the ball is untracked.** Broadcast fusion recovers 4,763 frames; elsewhere,
-  only slow features (tags, spread) can move possession. The optional video step targets this.
+  only slow features (tags, spread) can move possession. Ball detection in the video could target
+  this, if it can be validated (4.7).
 * **Geometric durations.** A semi-Markov model could encode realistic stoppage lengths.
 
 # 10. Reproduction

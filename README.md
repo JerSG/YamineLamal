@@ -61,12 +61,15 @@ python scripts/train_external.py     # ~1 minute; rewrites models/external_param
 It reads no competition data at all. It prints the leave-one-game-out check, training on two
 external games and testing on the third.
 
+The submitted file has SHA-256
+`6f0b718333586546f61ded5ddd58e2ca8b30307ba9975e69ec12972cb4c88a72`: running `python run.py` on the
+official data bundle reproduces exactly this file.
+
 ### Options
 
 | flag | effect |
 |---|---|
 | `--no-broadcast` | skip broadcast fusion (tactical tracking only) |
-| `--no-video` | ignore the optional video detections, even if their check passed |
 | `--transductive` | **not the submission.** The earlier development model, which fits its tables to the match's own tracking by unsupervised EM. Kept for reference (report, Section 7) |
 
 ## How it is trained (external data only)
@@ -86,28 +89,6 @@ external games and testing on the third.
   competition's ground truth, so this shows transfer between matches rather than predicting the
   competition score.
 
-## Optional: detect the ball in the video
-
-The ball is still untracked on many frames after the broadcast fill. An optional step looks for
-it in the tactical video with a public detector pre-trained on external data (Ultralytics YOLO11,
-COCO "sports ball"), maps detections to the pitch with the provided homography, and **checks
-itself** against the provided tracking on frames where the tracker does see the ball. If the
-check fails, `run.py` ignores it. Nothing in it is trained or tuned on the match or its video.
-
-```bash
-pip install -r requirements-video.txt
-python scripts/detect_ball_video.py --gpu --limit 300   # 1-2 minute trial, never used by run.py
-python scripts/detect_ball_video.py --gpu               # full run on an NVIDIA GPU: ~15-30 min
-python scripts/detect_ball_video.py --verify 300        # re-detect 300 frames, compare exactly
-python run.py                                           # prints "+ video ball" if it PASSED
-```
-
-Without a GPU, drop `--gpu` (~4 h on a CPU). The detections are a frozen intermediate file whose
-SHA-256 is recorded and checked by `run.py`, so the submission reproduces exactly from it on any
-machine. They are derived from the match video, so they are given to the organisers directly
-rather than published here. Check the licences of Ultralytics (AGPL-3.0) and COCO before relying
-on this step.
-
 ## Repository layout
 
 ```
@@ -120,11 +101,11 @@ possession/
   strict.py                   the submitted model: train on external games, apply frozen
   external.py                 readers + event-derived labels for the public sample games
   broadcast.py                broadcast-to-tactical alignment and ball fill
-  video.py                    optional ball detection in the video, with its acceptance check
+  extensions.py               candidate extra features, tested and not adopted (see report)
   pipeline.py                 data in, possession file out
 models/external_params.json   the frozen parameters (trained on external data)
 scripts/train_external.py     regenerates models/external_params.json from the public sample games
-scripts/detect_ball_video.py  the optional video step
+scripts/test_extensions.py    leave-one-game-out test of candidate extra features (external data)
 scripts/sensitivity.py        robustness check for the --transductive reference model
 tests/                        synthetic-data tests, no match data needed: python -m pytest -q
 evaluation/                   the organisers' validator and scorer, unchanged (MIT)
@@ -137,8 +118,8 @@ data/, external/, submission/ match data, external data, generated output: all g
 
 * **Training and tuning on external data only.** Every learned or tuned number in the submitted
   model comes from Metrica's public sample games. Nothing is fitted to the competition match.
-* **The competition data is used as input only:** tracking, Smart Tagging, broadcast tracking and,
-  optionally, the video through a detector pre-trained on external data.
+* **The competition data is used as input only:** tracking, Smart Tagging and broadcast tracking.
+  The videos are not used.
 * **No ground truth.** No parameter was fitted, calibrated or chosen on the public ground truth,
   and the submitted model was never scored against it.
 * **No hand labels or manual data** on the provided game.

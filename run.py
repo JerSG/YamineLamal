@@ -25,8 +25,6 @@ if __name__ == "__main__":
     p.add_argument("--no-broadcast", action="store_true",
                    help="do not fuse the broadcast tracking (on by default when data/broadcast/ "
                         "has the broadcast ATD and homography)")
-    p.add_argument("--no-video", action="store_true",
-                   help="ignore data/derived/video_ball.csv even if its check passed")
     p.add_argument("--out-dir", default=os.path.join(ROOT, "submission"))
     p.add_argument("--quiet", action="store_true")
     p.add_argument("--strict-external", action="store_true",
@@ -46,10 +44,10 @@ if __name__ == "__main__":
         from possession.pipeline import run
         print("NOTE: --transductive is the reference model, not the submission.")
         run(mode=a.mode, out_path=out, use_camera=not a.no_camera, report_path=report,
-            verbose=not a.quiet, use_broadcast=not a.no_broadcast, use_video=not a.no_video)
+            verbose=not a.quiet, use_broadcast=not a.no_broadcast)
     else:
         from possession.pipeline import run_strict
         run_strict(out_path=out, report_path=report, verbose=not a.quiet,
-                   use_broadcast=not a.no_broadcast, use_video=not a.no_video)
+                   use_broadcast=not a.no_broadcast)
     print("done in {:.0f} s.  Validate:  python evaluation/validate_submission.py {}".format(
         time.time() - t0, os.path.relpath(out, ROOT)))
