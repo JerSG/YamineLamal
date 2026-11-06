@@ -102,7 +102,19 @@ def gap_bin(missing):
     return np.searchsorted(np.asarray(C.GAP_BINS_S), length_s, side="right")
 
 
-GAP_VALUES = ["gap<1s", "gap1-4s", "gap4-10s", "gap>10s"]
+def edge_names(edges, unit, prefix=""):
+    """Value names that state the bin edges they stand for, e.g. ['gap<19s', 'gap19-33s', ...]."""
+    fmt = lambda v: ("%g" % round(float(v), 1))  # noqa: E731
+    e = list(edges)
+    names = [prefix + "<" + fmt(e[0]) + unit]
+    names += [prefix + fmt(a) + "-" + fmt(b) + unit for a, b in zip(e[:-1], e[1:])]
+    names.append(prefix + ">" + fmt(e[-1]) + unit)
+    return names
+
+
+def gap_values():
+    """Names of the ball-missing bins, from the current GAP_BINS_S."""
+    return edge_names(C.GAP_BINS_S, "s", prefix="gap")
 
 
 def centred_mean(x, half_window):
@@ -124,13 +136,11 @@ def centred_mean(x, half_window):
 # ------------------------------------------------------------------------------------------------
 def ball_feature_basic(nearest):
     """nearest: per-frame 0 home / 1 away / -1 ball not tracked."""
-    values = ["home", "away"] + GAP_VALUES
+    values = ["home", "away"] + gap_values()
     missing = nearest < 0
     codes = np.where(missing, 2 + gap_bin(missing), nearest).astype(np.int16)
-    init_team = {"home": 0.42, "away": 0.18, "gap<1s": 0.06, "gap1-4s": 0.08,
-                 "gap4-10s": 0.12, "gap>10s": 0.14}
-    init_dead = {"home": 0.15, "away": 0.15, "gap<1s": 0.05, "gap1-4s": 0.10,
-                 "gap4-10s": 0.20, "gap>10s": 0.35}
+    init_team = dict(zip(values, [0.42, 0.18, 0.06, 0.08, 0.12, 0.14]))
+    init_dead = dict(zip(values, [0.15, 0.15, 0.05, 0.10, 0.20, 0.35]))
     return Feature("ball", values, codes, init_team, init_dead, learn_dead=False)
 
 
@@ -169,10 +179,14 @@ def kickoff_strikes(events):
                   if e["code"] == "SET PIECES" and e["type"].startswith("kick off"))
 
 
-def setpiece_feature(events, n_frames):
-    """Inside a (non-kickoff) set-piece tag: taker x seconds since the tag opened."""
+def setpiece_feature(events, n_frames, fractions=None):
+    """Inside a (non-kickoff) set-piece tag: taker x time since the tag opened.
+
+    By default the time bins are SETPIECE_BINS_S seconds. With `fractions` (e.g. (0.25, 0.5,
+    0.75)) they are instead those fractions of each tag's own length -- a fixed rule that uses
+    no data, as the strict-external model requires."""
     bins = np.asarray(C.SETPIECE_BINS_S) * C.FPS
-    n_bins = len(bins) + 1
+    n_bins = (len(fractions) if fractions is not None else len(bins)) + 1
     teams = ["home", "away", "na"]
     values = ["none"] + ["{}_t{}".format(t, b) for t in teams for b in range(n_bins)]
     codes = np.zeros(n_frames, dtype=np.int16)
@@ -183,7 +197,8 @@ def setpiece_feature(events, n_frames):
         if t <= s:
             continue
         team = {HOME: 0, AWAY: 1, None: 2}[e["team"]]
-        b = np.searchsorted(bins, np.arange(t - s), side="right")
+        edges = bins if fractions is None else np.asarray(fractions) * (e["end"] - e["start"])
+        b = np.searchsorted(edges, np.arange(t - s), side="right")
         codes[s:t] = 1 + team * n_bins + b
     # Starting point: early in the window it is more likely dead; later the taker has the ball.
     init_team, init_dead = {"none": 0.9}, {"none": 0.8}
@@ -282,7 +297,7 @@ def tracking_summary(players, ball, slot_team, pitch):
 
 
 def ball_feature_full(t):
-    values = ["home_on", "home_near", "away_on", "away_near", "contest"] + GAP_VALUES
+    values = ["home_on", "home_near", "away_on", "away_near", "contest"] + gap_values()
     r = C.CONTROL_RADIUS_M
     missing = t["nearest"] < 0
     dh, da = t["dh"], t["da"]
@@ -293,12 +308,8 @@ def ball_feature_full(t):
              values.index("away_on")],
             values.index("away_near"))
     codes = np.where(missing, 5 + gap_bin(missing), tracked).astype(np.int16)
-    init_team = {"home_on": 0.22, "home_near": 0.22, "away_on": 0.05, "away_near": 0.12,
-                 "contest": 0.05, "gap<1s": 0.06, "gap1-4s": 0.08, "gap4-10s": 0.10,
-                 "gap>10s": 0.10}
-    init_dead = {"home_on": 0.05, "home_near": 0.10, "away_on": 0.05, "away_near": 0.10,
-                 "contest": 0.02, "gap<1s": 0.05, "gap1-4s": 0.10, "gap4-10s": 0.20,
-                 "gap>10s": 0.33}
+    init_team = dict(zip(values, [0.22, 0.22, 0.05, 0.12, 0.05, 0.06, 0.08, 0.10, 0.10]))
+    init_dead = dict(zip(values, [0.05, 0.10, 0.05, 0.10, 0.02, 0.05, 0.10, 0.20, 0.33]))
     return Feature("ball", values, codes, init_team, init_dead, learn_dead=False)
 
 
@@ -308,7 +319,7 @@ def _binned(x, edges, unknown_code):
 
 
 def pspeed_feature(t):
-    values = ["<0.9", "0.9-1.3", "1.3-1.8", "1.8-2.5", ">2.5", "unknown"]
+    values = edge_names(C.PLAYER_SPEED_BINS_MS, "m/s") + ["unknown"]
     codes = _binned(t["mean_speed"], C.PLAYER_SPEED_BINS_MS, 5)
     init_team = dict(zip(values, [0.08, 0.17, 0.30, 0.30, 0.15]))
     init_dead = dict(zip(values, [0.40, 0.30, 0.18, 0.09, 0.03]))
@@ -317,10 +328,10 @@ def pspeed_feature(t):
 
 
 def bspeed_feature(t):
-    values = ["still", "rolling", "passed", "struck", "unknown"]
+    values = edge_names(C.BALL_SPEED_BINS_MS, "m/s", prefix="ball") + ["unknown"]
     codes = _binned(t["ball_speed"], C.BALL_SPEED_BINS_MS, 4)
-    init_team = {"still": 0.10, "rolling": 0.45, "passed": 0.35, "struck": 0.10}
-    init_dead = {"still": 0.40, "rolling": 0.40, "passed": 0.15, "struck": 0.05}
+    init_team = dict(zip(values, [0.10, 0.45, 0.35, 0.10]))
+    init_dead = dict(zip(values, [0.40, 0.40, 0.15, 0.05]))
     return Feature("bspeed", values, codes, init_team, init_dead, team_bearing=False,
                    neutral=("unknown",))
 

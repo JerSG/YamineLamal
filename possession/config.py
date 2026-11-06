@@ -147,4 +147,7 @@ VIDEO_MIN_SHARE_WITHIN_3M = 0.80
 STRICT_EXTERNAL_PITCH = (105.0, 68.0)   # [data] Metrica sample games' pitch (their README)
 STRICT_SPEED_SMOOTH_FRAMES = 5          # [model] +/- 0.2 s smoothing of position-derived speed
 # [model] evidence scales tried on the external games; the best mean spellF1 there is kept
-STRICT_SCALE_GRID = (0.25, 0.35, 0.5, 0.7, 1.0, 1.4, 2.0, 2.8, 4.0, 5.6, 8.0)
+STRICT_SCALE_GRID = (2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 12.0, 14.0, 16.0)
+# [model] Most observations a feature may contribute: one per second (25 frames), however much
+# it flickers. Protects the frozen model from noisier tracking than it was trained on.
+STRICT_MIN_LOOK_FRAMES = 25

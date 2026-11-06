@@ -284,13 +284,17 @@ def test_strict_external_model_trains_and_applies_on_synthetic_data():
     slot_team = np.array([0, 0, 1, 1], dtype=np.int8)
     pitch = (105.0, 68.0)
     ext = [game(s) for s in (1, 2)]
-    feats = [ST.tracking_features(p, b, slot_team, pitch) for p, b, _ in ext]
     labs = [lab for _, _, lab in ext]
+    summaries = [ST.summarise(p, b, slot_team, pitch) for p, b, _ in ext]
+    bins = ST.derive_bins(summaries, labs)              # bins from the 'external' games only
+    with ST.use_bins(bins):
+        feats = [ST.tracking_features(None, None, None, None, summary=t) for t in summaries]
     tables = ST.fit_tables(feats, labs)
     trans, stats = ST.fit_transitions(labs)
     assert 5 < stats["mean_alive_spell_s"] < 30
-    scale, curve = ST.tune_scale(feats, labs, tables, trans, grid=(0.5, 2.0, 8.0))
-    params = {"features": {f.name: {"values": f.values, "table": t.tolist()}
+    scale, curve = ST.tune_scale(feats, labs, tables, trans, grid=(2.0, 6.0, 16.0))
+    params = {"bins": bins,
+              "features": {f.name: {"values": f.values, "table": t.tolist()}
                            for f, t in zip(feats[0], tables)},
               "transitions": trans.tolist(), "scale": scale}
     p, b, lab = game(9)
@@ -301,8 +305,11 @@ def test_strict_external_model_trains_and_applies_on_synthetic_data():
     assert forced[:100].all() and not forced[100:].any() and (path[:100] == 2).all()
     assert np.mean(path[100:] == lab[100:]) > 0.6     # far above chance on an unseen 'match'
     # weights are a fixed local rule: one observation per run of identical codes
-    w = ST.run_weights(np.array([0, 0, 0, 1, 2, 2]), [(0, 6)])
+    w = ST.run_weights(np.array([0, 0, 0, 1, 2, 2]), [(0, 6)], min_look_frames=1)
     assert np.allclose(w, [1 / 3, 1 / 3, 1 / 3, 1, 0.5, 0.5])
+    # ... capped at one observation per min_look_frames, however much the codes flicker
+    flicker = np.tile([0, 1], 50)
+    assert np.isclose(ST.run_weights(flicker, [(0, 100)], min_look_frames=25).sum(), 100 / 25.0)
 
 
 def test_video_detections_fingerprint_blocks_tampered_files():
