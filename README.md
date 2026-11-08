@@ -127,6 +127,6 @@ data/, external/, submission/ match data, external data, generated output: all g
 
 ## Licence
 
-Our code is MIT (`LICENSE`). `evaluation/` and `games.py` are the organisers' files, unchanged,
-under their MIT licence (`LICENSE-organisers`). Neither the match data nor Metrica's sample data
-is covered by either licence; the sample data is acknowledged above.
+`evaluation/` and `games.py` are the organisers' files, unchanged, under their MIT licence
+(`LICENSE-organisers`). The rest of the code is the team's own. Neither the match data nor
+Metrica's sample data is covered by the organisers' licence; the sample data is acknowledged above.
