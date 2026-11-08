@@ -26,7 +26,7 @@ PAGE = r"""<!doctype html>
 <title>__TITLE__</title>
 <style>
   :root { --bg:#0f1720; --panel:#17212c; --text:#e6edf3; --muted:#8b98a5; --line:rgba(255,255,255,.55);
-          --grass:#1f6b3a; --grass2:#226f3d; --home:#3b82f6; --away:#f43f5e; --dead:#9aa4ae; --ball:#ffd43b; }
+          --grass:#1f6b3a; --grass2:#226f3d; --home:#4da3ff; --away:#ffb020; --dead:#9aa4ae; --ball:#ffffff; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--text);
          font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
@@ -77,7 +77,7 @@ PAGE = r"""<!doctype html>
       <span><span class="sw" style="background:var(--away)"></span><span id="la">A</span></span>
       <span><span class="sw" style="background:var(--dead)"></span>D dead ball</span>
       <span><span class="sw" style="background:#2a3440"></span>X not graded</span>
-      <span><span class="sw" style="background:var(--ball)"></span>ball (hollow = filled from broadcast)</span>
+      <span><span class="sw" style="background:var(--ball);border-radius:50%;box-shadow:0 0 0 2px rgba(0,0,0,.6)"></span>ball (hollow ring = filled from broadcast)</span>
       <span>thin bars: two minutes around the cursor</span>
       <span>keys: space play/pause, left/right 1 s, shift+left/right 10 s</span>
     </div>
@@ -141,10 +141,12 @@ function draw(i) {
   }
   const bx = B[2 * i], by = B[2 * i + 1];
   if (bx !== NAN) {
-    cx.beginPath(); cx.arc(X(bx / 65534), Y(by / 65534), 5, 0, 2 * Math.PI);
-    const filled = BF && BF[i] === 1;
-    cx.lineWidth = 2.5; cx.strokeStyle = col('--ball');
-    if (filled) cx.stroke(); else { cx.fillStyle = col('--ball'); cx.fill(); cx.strokeStyle = '#000'; cx.lineWidth = 1; cx.stroke(); }
+    const filled = BF && BF[i] === 1, bxp = X(bx / 65534), byp = Y(by / 65534);
+    cx.beginPath(); cx.arc(bxp, byp, 8.5, 0, 2 * Math.PI);          // dark halo: never lost on the lines
+    cx.fillStyle = 'rgba(0,0,0,.45)'; cx.fill();
+    cx.beginPath(); cx.arc(bxp, byp, 5.5, 0, 2 * Math.PI);
+    if (filled) { cx.lineWidth = 2.5; cx.strokeStyle = col('--ball'); cx.stroke(); }
+    else { cx.fillStyle = col('--ball'); cx.fill(); }
   }
   const f = Math.min(i * D.step, D.n_frames - 1), lab = tracks[0].frames[f];
   const badge = document.getElementById('badge');

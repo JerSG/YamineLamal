@@ -19,7 +19,7 @@ DT = 0.25
 S = 8.0                     # SVG units per metre
 MX, MY = 24.0, 108.0        # pitch origin in the SVG
 L, W = 105.0, 68.0
-HOME, AWAY, DEAD, LINE = "#3b82f6", "#f43f5e", "#9aa4ae", "rgba(255,255,255,0.6)"
+HOME, AWAY, DEAD, LINE = "#4da3ff", "#ffb020", "#9aa4ae", "rgba(255,255,255,0.6)"
 
 # (t, x, y) of the ball, in metres; linear in between. Home attacks left to right.
 BALL = [(0.0, 42, 34), (1.2, 43, 36), (1.9, 45, 50), (3.0, 52, 52), (3.4, 53, 51),
@@ -130,7 +130,11 @@ def svg():
     # ball
     bxs = ";".join("{:.1f}".format(px(ball_at(t)[0])) for t in ts)
     bys = ";".join("{:.1f}".format(py(ball_at(t)[1])) for t in ts)
-    o.append('<circle r="5.5" fill="#ffd43b" stroke="#000" stroke-width="1">'
+    o.append('<circle r="9" fill="rgba(0,0,0,.45)">'
+             '<animate attributeName="cx" values="{}" keyTimes="{}" dur="{}" '
+             'repeatCount="indefinite"/><animate attributeName="cy" values="{}" keyTimes="{}" '
+             'dur="{}" repeatCount="indefinite"/></circle>'.format(bxs, kt, dur, bys, kt, dur))
+    o.append('<circle r="6" fill="#ffffff">'
              '<animate attributeName="cx" values="{}" keyTimes="{}" dur="{}" '
              'repeatCount="indefinite"/><animate attributeName="cy" values="{}" keyTimes="{}" '
              'dur="{}" repeatCount="indefinite"/></circle>'.format(bxs, kt, dur, bys, kt, dur))
