@@ -16,7 +16,7 @@ frozen and applied unchanged to the competition match. That covers the feature b
 emission probabilities, the transition probabilities and the one evidence scale. The competition
 match's automatic tracking, Smart Tagging and broadcast recording are used **as input only**.
 No ground truth, no video and no human-produced data about the match are used to fit, tune or
-check anything. This follows the organisers' rules clarification: *"If you need to train (or
+check the submitted model. This follows the organisers' rules clarification: *"If you need to train (or
 retrain), you MUST use only external data."*
 
 Main components:
@@ -197,6 +197,14 @@ None improves the held-out games reliably. Pressure and carrier largely repeat t
 which double-counts the same evidence and fragments possessions. Advance's +0.002 is far below the
 noise of a three-game test. None was adopted.
 
+We also tested a stronger learned model under the same protocol: a gradient-boosted classifier
+(LightGBM) on 14 raw tracking measurements, made home/away symmetric by mirroring, decoded with
+the same Viterbi, with its strength chosen by cross-fitting within the two training games. It
+scored 0.555 / 0.628 / 0.583 (mean 0.588 against 0.572): better on two games, worse on one, with
+its strength setting changing between folds (0.10 and 0.20). The +0.017 mean is within the noise
+of a three-game test, and the classifier has no cap on evidence for tracking noisier than its
+training data, so it was not adopted.
+
 # 5. Possession rules as implemented
 
 * **Ball alive or dead:** dead where the physical evidence of a stoppage outweighs the cost of
@@ -278,7 +286,11 @@ any kind from the competition match was labelled, by hand or otherwise, for trai
 * **Turnovers while the ball is untracked.** Broadcast fusion recovers 4,763 frames; elsewhere,
   only slow features (tags, spread) can move possession. Ball detection in the video could target
   this, if it can be validated (4.7).
-* **Geometric durations.** A semi-Markov model could encode realistic stoppage lengths.
+* **Durations.** The model treats possession and stoppage durations as geometric. Measured on the
+  external games, that is close to reality: possession lengths vary *more* than geometric
+  (coefficient of variation 1.16, with 16% of possessions shorter than 2 s), and stoppages vary
+  about as much (0.92). A semi-Markov model, which would favour typical lengths, is therefore not
+  expected to help.
 
 # 10. Reproduction
 
