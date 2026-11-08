@@ -73,8 +73,8 @@ PAGE = r"""<!doctype html>
       <span class="clock" id="clock"></span>
     </div>
     <div class="legend">
-      <span><span class="sw" style="background:var(--home)"></span><span id="lh">H</span></span>
-      <span><span class="sw" style="background:var(--away)"></span><span id="la">A</span></span>
+      <span><span class="sw" id="sh" style="background:var(--home)"></span><span id="lh">H</span></span>
+      <span><span class="sw" id="sa" style="background:var(--away)"></span><span id="la">A</span></span>
       <span><span class="sw" style="background:var(--dead)"></span>D dead ball</span>
       <span><span class="sw" style="background:#2a3440"></span>X not graded</span>
       <span><span class="sw" style="background:var(--ball);border-radius:50%;box-shadow:0 0 0 2px rgba(0,0,0,.6)"></span>ball (hollow ring = filled from broadcast)</span>
@@ -95,7 +95,15 @@ const P = decode(D.players), B = decode(D.ball), BF = D.ball_filled ? decode(D.b
 const N = D.n_samples, S = D.n_slots, NAN = 65535;
 const css = getComputedStyle(document.documentElement);
 const col = k => css.getPropertyValue(k).trim();
+if (D.colours) {                                   // per-match label colours, e.g. club colours
+  document.documentElement.style.setProperty('--home', D.colours[0]);
+  document.documentElement.style.setProperty('--away', D.colours[1]);
+}
 const COL = { H: col('--home'), A: col('--away'), D: col('--dead'), X: '#2a3440' };
+// player dots: one colour, or a kit split in two halves (left, right)
+const KIT = D.kits || [[COL.H, COL.H], [COL.A, COL.A]];
+for (const [id, k] of [['sh', KIT[0]], ['sa', KIT[1]]])
+  document.getElementById(id).style.background = 'linear-gradient(90deg,' + k[0] + ' 50%,' + k[1] + ' 50%)';
 document.getElementById('title').textContent = D.title;
 document.getElementById('subtitle').textContent = D.subtitle;
 document.getElementById('footer').textContent = D.footer;
@@ -135,18 +143,22 @@ function draw(i) {
   for (let s = 0; s < S; s++) {
     const qx = P[base + 2 * s], qy = P[base + 2 * s + 1];
     if (qx === NAN) continue;
-    cx.beginPath(); cx.arc(X(qx / 65534), Y(qy / 65534), 7, 0, 2 * Math.PI);
-    cx.fillStyle = D.slot_team[s] === 0 ? COL.H : COL.A; cx.fill();
-    cx.lineWidth = 1.5; cx.strokeStyle = 'rgba(0,0,0,.6)'; cx.stroke();
+    const px = X(qx / 65534), py = Y(qy / 65534), kit = KIT[D.slot_team[s]];
+    cx.beginPath(); cx.arc(px, py, 8, Math.PI / 2, 3 * Math.PI / 2); cx.closePath();
+    cx.fillStyle = kit[0]; cx.fill();
+    cx.beginPath(); cx.arc(px, py, 8, -Math.PI / 2, Math.PI / 2); cx.closePath();
+    cx.fillStyle = kit[1]; cx.fill();
+    cx.beginPath(); cx.arc(px, py, 8, 0, 2 * Math.PI);
+    cx.lineWidth = 1.5; cx.strokeStyle = 'rgba(0,0,0,.7)'; cx.stroke();
   }
   const bx = B[2 * i], by = B[2 * i + 1];
   if (bx !== NAN) {
     const filled = BF && BF[i] === 1, bxp = X(bx / 65534), byp = Y(by / 65534);
     cx.beginPath(); cx.arc(bxp, byp, 8.5, 0, 2 * Math.PI);          // dark halo: never lost on the lines
     cx.fillStyle = 'rgba(0,0,0,.45)'; cx.fill();
-    cx.beginPath(); cx.arc(bxp, byp, 5.5, 0, 2 * Math.PI);
+    cx.beginPath(); cx.arc(bxp, byp, 5, 0, 2 * Math.PI);
     if (filled) { cx.lineWidth = 2.5; cx.strokeStyle = col('--ball'); cx.stroke(); }
-    else { cx.fillStyle = col('--ball'); cx.fill(); }
+    else { cx.fillStyle = col('--ball'); cx.fill(); cx.lineWidth = 1.5; cx.strokeStyle = '#000'; cx.stroke(); }
   }
   const f = Math.min(i * D.step, D.n_frames - 1), lab = tracks[0].frames[f];
   const badge = document.getElementById('badge');
@@ -241,11 +253,13 @@ def _rle(labels):
 
 def build_html(out_path, players, ball, slot_team, label_tracks, pitch, title, subtitle="",
                footer="", team_names=("home", "away"), frame_ids=None, ball_filled=None,
+               kits=None, colours=None,
                step=5, fps=25, start_frame=0):
     """Write the replay page.
 
     players (T, slots, >=2) and ball (T, >=2) in normalised pitch coordinates (0..1, NaN where not
-    tracked); label_tracks: [(name, labels as 'H'/'A'/'D'/'X' per frame)], the first one drives the
+    tracked); kits: optional [(left, right)] colours per team for the player dots, colours:
+    optional (home, away) colours for the labels and timelines; label_tracks: [(name, labels as 'H'/'A'/'D'/'X' per frame)], the first one drives the
     badge; ball_filled: optional bool per frame, ball positions that came from the broadcast.
     """
     T = len(ball)
@@ -254,6 +268,8 @@ def build_html(out_path, players, ball, slot_team, label_tracks, pitch, title, s
         "title": title, "subtitle": subtitle, "footer": footer,
         "team_names": list(team_names), "pitch": [float(pitch[0]), float(pitch[1])],
         "fps": fps, "step": step, "n_frames": T, "n_samples": len(idx),
+        "kits": [list(k) for k in kits] if kits else None,
+        "colours": list(colours) if colours else None,
         "n_slots": int(players.shape[1]), "slot_team": [int(t) for t in slot_team],
         "players": _quantise(players[idx, :, :2]), "ball": _quantise(ball[idx, :2]),
         "ball_filled": (base64.b64encode(np.asarray(ball_filled)[idx].astype("<u2").tobytes())
@@ -273,6 +289,12 @@ def build_html(out_path, players, ball, slot_team, label_tracks, pitch, title, s
     return out_path
 
 
+# The competition match's club colours, for the player dots: home blue and garnet, away red and
+# white stripes. The labels and timelines use one colour per team.
+MATCH_KITS = (("#2f6fde", "#a50044"), ("#e3262b", "#ffffff"))
+MATCH_COLOURS = ("#3b82f6", "#e3262b")
+
+
 def write_match_page(out, players, ball, ball_filled, meta, labels, team, step=5):
     """The competition replay page; also called by run.py with the tracking it already read."""
     import games
@@ -286,5 +308,5 @@ def write_match_page(out, players, ball, ball_filled, meta, labels, team, step=5
                       "file: the match data is licensed for the competition only, do not "
                       "publish it.".format(team),
                team_names=meta["names"], ball_filled=ball_filled, step=step, fps=C.FPS,
-               start_frame=first)
+               start_frame=first, kits=MATCH_KITS, colours=MATCH_COLOURS)
     return out
