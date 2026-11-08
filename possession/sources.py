@@ -1,12 +1,8 @@
 """Readers for the provided assets. Standard library + numpy only.
 
-Three inputs, in the order the pipeline prefers them:
+The competition inputs the pipeline reads:
 
-  read_atd()              the raw tactical tracking (players + ball), per video frame
-  read_nearest_signal()   fallback when the raw tracking is absent: the organisers' published
-                          `baseline_raw.csv`, which is *exactly* "team of the nearest tracked
-                          player to the ball, D where the ball is missing", computed from the ATD
-                          by starter/baseline.py. It contains no ground truth.
+  read_atd_meta(), read_atd()   tracking metadata and raw tracking (players + ball), per frame
   read_smart_tagging()    the automatic tactical tagging, as video-frame intervals
 """
 
@@ -82,31 +78,6 @@ def read_atd(raw_path, n_slots, n_frames):
     if bad:
         print("  warning: {} malformed ATD lines skipped".format(bad))
     return players, ball
-
-
-# ------------------------------------------------------------------------------------------------
-# Fallback: the published nearest-player signal
-# ------------------------------------------------------------------------------------------------
-def read_nearest_signal(path, n_frames):
-    """Per-frame code: 0 home nearest, 1 away nearest, -1 ball not tracked.
-
-    `baseline_raw.csv` is the unsmoothed output of the organisers' starter/baseline.py: for every
-    frame with a tracked ball, the team of the nearest tracked player; `D` exactly where the ATD
-    has no ball. It is computed from the ATD alone (see evaluation/results/README.md).
-    """
-    codes = np.full(n_frames, -1, dtype=np.int8)
-    with open(path) as handle:
-        header = handle.readline().strip().lower()
-        if header != "frame,label":
-            raise ValueError("{}: unexpected header {!r}".format(path, header))
-        for i, line in enumerate(handle):
-            frame, label = line.strip().split(",")
-            if int(frame) != i:
-                raise ValueError("{}: frame column out of order at row {}".format(path, i))
-            codes[i] = {"H": HOME, "A": AWAY}.get(label.strip().upper(), -1)
-    if i + 1 != n_frames:
-        raise ValueError("{}: {} rows, expected {}".format(path, i + 1, n_frames))
-    return codes
 
 
 # ------------------------------------------------------------------------------------------------

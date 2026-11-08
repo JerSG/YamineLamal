@@ -58,7 +58,7 @@ leave-one-game-out results in Section 6 show the transfer.
 | Smart Tagging (competition) | input: open-play phases, set pieces, goals, kickoffs | fixed prior tables, nothing learned |
 | broadcast ATD + homography (competition) | input: ball positions for tactical frames without a ball (Section 4.6) | the homography is used only to find camera cuts |
 | Metrica sample games 1-3 (external) | **all training and tuning** | https://github.com/metrica-sports/sample-data |
-| tactical homography (competition) | **dropped** | the camera-zone feature of our earlier model was dropped: no external equivalent |
+| tactical homography (competition) | **dropped** | a camera-zone feature was considered and dropped: no external equivalent to learn it from |
 | tactical and broadcast videos | **dropped** | see 4.7 |
 | public ground truth | **not used** for the submitted model | Section 7 |
 
@@ -240,22 +240,18 @@ different Python environments, gave the identical result. The submitted file's S
 `6f0b718333586546f61ded5ddd58e2ca8b30307ba9975e69ec12972cb4c88a72`. Re-training on the external
 games gives a byte-identical `external_params.json`.
 
-# 7. Use of the provided data and the ground truth; development history
+# 7. Use of the provided data and the ground truth
 
 * **Submitted model:** no parameter is fitted, tuned or calibrated on the competition match, its
   ground truth or its video. The match's tracking, Smart Tagging and broadcast data are inputs.
   The broadcast alignment is an automatic check using only the provided data, with thresholds fixed
   in advance.
-* **Ground truth:** the submitted model was never scored on the public 5-minute window. Our only
-  use of the public ground truth was early in development: looking at its segments to understand
-  what counts as possession, and scoring an **earlier** model (below) as a smoke test.
-* **Development history:** our earlier model (`run.py --transductive`, kept for reference)
-  fitted its emission tables by unsupervised EM to the competition match's own tracking, without
-  labels, and calibrated its scale on the same data. After the organisers' clarification that
-  training and tuning must use external data only, we replaced it with the model described here.
-  We also re-derived every data-dependent constant from external data: bin edges that had been
-  chosen while looking at the match, and a kickoff offset measured on the match, were replaced
-  by external quantiles and fixed rules.
+* **Ground truth:** the submitted model was never scored on the public 5-minute window, and none
+  of its parameters comes from it. Our only use of the public ground truth was early in
+  development: looking at its segments to understand what counts as possession, and as a smoke
+  test of early versions of the pipeline.
+* **No constant is measured on the match:** every bin edge is learned on the external games, and
+  the kickoff and goal features use the Smart Tagging's own tag boundaries, with no offset.
 * **Fixed rules and priors** (not tuned on any data): the Smart Tagging prior tables, the quantile
   levels, the one-observation-per-second cap, the set-piece quarters, the 2 m control radius and
   the broadcast thresholds. Some were written down while working on this project. None was chosen

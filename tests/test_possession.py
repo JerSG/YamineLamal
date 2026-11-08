@@ -15,91 +15,26 @@ sys.path.insert(0, os.path.join(ROOT, "evaluation"))
 
 from possession import features as F  # noqa: E402
 from possession import sources as S  # noqa: E402
-from possession.hmm import PossessionHMM, H, A, D, mean_run_length  # noqa: E402
 from possession.pipeline import write_submission  # noqa: E402
 
 
-def planted_match(seed=0, n_spells=60):
-    """A synthetic half: alternating H/A spells with stoppages, and noisy observations of it."""
-    rng = np.random.RandomState(seed)
-    truth = []
-    team = H
-    for _ in range(n_spells):
-        truth += [team] * rng.randint(150, 600)
-        if rng.rand() < 0.3:
-            truth += [D] * rng.randint(200, 500)
-            team = rng.choice([H, A])
-        else:
-            team = A if team == H else H
-    truth = np.array(truth)
-    T = len(truth)
-    # nearest team: right 70% of the time while alive, noise when dead; in runs of 10 frames
-    nearest = np.empty(T, dtype=np.int8)
-    for s in range(0, T, 10):
-        st = truth[s]
-        if st == D:
-            v = rng.choice([-1, 0, 1], p=[0.6, 0.2, 0.2])
-        else:
-            right = 0 if st == H else 1
-            v = rng.choice([right, 1 - right, -1], p=[0.6, 0.25, 0.15])
-        nearest[s:s + 10] = v
-    # player speed: slow when dead
-    speed = np.where(truth == D, rng.gamma(2.0, 0.35, T), rng.gamma(4.0, 0.5, T))
-    speed = F.centred_mean(speed, 12)
-    return truth, nearest, speed
-
-
-def build(nearest, speed):
-    ball = F.ball_feature_basic(nearest)
-    ps = F.pspeed_feature({"mean_speed": speed})
-    return [ball, ps]
-
-
-def test_hmm_recovers_planted_possessions():
-    truth, nearest, speed = planted_match()
-    blocks = [(0, len(truth))]
-    model = PossessionHMM(build(nearest, speed), blocks=blocks)
-    model.calibrate_scale(blocks, verbose=False)
-    model.fit(blocks, verbose=False)
-    model.calibrate_scale(blocks, verbose=False)
-    path = model.decode(blocks)
-    acc = np.mean(path == truth)
-    assert acc > 0.85, acc
-    # dead balls found from player speed alone
-    dead_recall = np.mean(path[truth == D] == D)
-    assert dead_recall > 0.8, dead_recall
-
-
-def test_home_away_symmetry():
-    """Swapping the teams in the input must swap H and A in the output, frame for frame."""
-    truth, nearest, speed = planted_match(seed=3, n_spells=30)
-    swapped = np.where(nearest >= 0, 1 - nearest, nearest).astype(np.int8)
-    blocks = [(0, len(truth))]
-    paths = []
-    for obs in (nearest, swapped):
-        m = PossessionHMM(build(obs, speed), blocks=blocks)
-        m.fit(blocks, verbose=False)
-        paths.append(m.decode(blocks))
-    mirrored = np.where(paths[1] == H, A, np.where(paths[1] == A, H, D))
-    assert np.mean(paths[0] == mirrored) > 0.999
-
-
 def test_neutral_values_carry_no_evidence():
-    codes = np.array([0, 1, 5, 5, 5])  # 5 = "unknown"
+    """'Not measurable on this frame' adds nothing to any state's log-likelihood."""
+    from possession import strict as ST
     f = F.pspeed_feature({"mean_speed": np.array([0.5, 1.0, np.nan, np.nan, np.nan])})
-    assert list(f.codes) == list(codes)
-    m = PossessionHMM([f], blocks=[(0, 5)])
+    assert list(f.codes) == [0, 1, 5, 5, 5]                     # 5 = "unknown"
+    table = ST.PossessionHMM._tables_from(f.init_team, f.init_dead, f)
+    trans = np.full((3, 3), 1.0 / 3)
+    m = ST.FrozenHMM([f], [table], trans, 1.0, [(0, 5)])
     L = m.log_emissions()
     assert np.all(L[2:] == 0.0)
     assert not np.all(L[:2] == 0.0)
 
 
 def test_run_lengths_and_gap_bins():
-    missing = np.array([0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-                        1, 1, 1, 1, 1, 1, 1], dtype=bool)
+    missing = np.array([0, 1, 1, 0] + [1] * 27, dtype=bool)
     lengths = F.run_lengths(missing)
     assert lengths[1] == 2 and lengths[4] == 27 and lengths[0] == 1
-    assert mean_run_length(np.array([0, 0, 1, 1, 1, 2])) == 2.0
 
 
 def write_synthetic_atd(folder, n_frames=200, n_slots=4):
@@ -256,6 +191,18 @@ def test_strict_external_model_trains_and_applies_on_synthetic_data():
     path, model, forced = ST.apply(params, p, b, slot_team, events, len(lab), blocks, pitch)
     assert forced[:100].all() and not forced[100:].any() and (path[:100] == 2).all()
     assert np.mean(path[100:] == lab[100:]) > 0.6     # far above chance on an unseen 'match'
+    # home/away symmetry: swapping the teams in the input mirrors every feature exactly, and
+    # mirrors the output except where both teams are exactly equally likely -- there Viterbi's
+    # fixed tie-break (first state wins) decides, deterministically
+    swapped = (1 - slot_team).astype(np.int8)
+    with ST.use_bins(params["bins"]):
+        f_orig = ST.tracking_features(p, b, slot_team, pitch)
+        f_swap = ST.tracking_features(p, b, swapped, pitch)
+    for fo, fs in zip(f_orig, f_swap):
+        assert np.array_equal(fo.swap[fo.codes], fs.codes), fo.name
+    path_sw, _, _ = ST.apply(params, p, b, swapped, events, len(lab), blocks, pitch)
+    mirrored = np.where(path_sw == 0, 1, np.where(path_sw == 1, 0, path_sw))
+    assert np.mean(path == mirrored) > 0.995
     # weights are a fixed local rule: one observation per run of identical codes
     w = ST.run_weights(np.array([0, 0, 0, 1, 2, 2]), [(0, 6)], min_look_frames=1)
     assert np.allclose(w, [1 / 3, 1 / 3, 1 / 3, 1, 0.5, 0.5])

@@ -4,22 +4,22 @@ Every feature is a small categorical variable per frame. Team-bearing features a
 *absolute* terms (home / away); the HMM ties the H and A states by swapping home<->away, so a
 feature means the same thing for both teams and the model has half the parameters to learn.
 
-Each feature carries the *starting point* of its emission table for the possessing-team state
-(written from the home team's point of view) and for the dead-ball state. EM moves both, on the
-whole match, without labels -- see hmm.py. The starting points are deliberately mild.
+Each feature carries a prior for its emission table. For the tracking features this prior is only
+the Dirichlet starting point of the supervised fit on the external games (strict.fit_tables); for
+the Smart Tagging features, which no external game has, it is the table itself (fixed, not
+learned).
 
-  basic features (need only the nearest-team signal + Smart Tagging)
-    ball        nearest team to the ball, or length of the ball-missing stretch
-    phase       open-play Smart Tagging phases, translated into "which team is attacking"
-    setpiece    inside a set-piece tag: team that takes it x time since the tag opened
-    goal        inside a goal tag: time left until the restart kickoff
-  full features (need the raw tracking)
-    ball        as above, but split by whether the nearest player is on the ball (< 2 m) and
-                with a "contested" value when both teams are on it
+  from the tracking (tables learned on the external games)
+    ball        team of the nearest player to the ball, split by whether they are on it (< 2 m),
+                "contested" when both teams are; or the length of the ball-missing stretch
     pspeed      mean speed of the tracked players (stoppages are walked)
-    bpos        ball position against the touch/goal lines, and "lost after going out"
     bspeed      ball speed
+    bpos        ball position against the touch/goal lines, and "lost after going out"
     spread      which team is more spread out (the team in possession opens the pitch up)
+  from the Smart Tagging (fixed prior tables)
+    phase       open-play phases, translated into "which team is attacking"
+    setpiece    inside a set-piece tag: team that takes it x quarter of the tag
+    goal        inside a goal tag: time left until the kickoff tag after it
 """
 
 import numpy as np
@@ -29,18 +29,12 @@ from .sources import HOME, AWAY
 
 
 class Feature(object):
-    def __init__(self, name, values, codes, init_team, init_dead, team_bearing=True,
-                 learn_team=True, learn_dead=True, neutral=()):
+    def __init__(self, name, values, codes, init_team, init_dead, team_bearing=True, neutral=()):
         self.name = name
         # Values that carry no evidence ("not measurable on this frame"). They contribute a
         # likelihood ratio of 1 to every state, so the *absence* of a measurement can never be
         # learned as evidence by this feature -- missingness is modelled once, by the ball feature.
         self.neutral = np.array([v in neutral for v in values], dtype=bool)
-        # Which of the two emission tables EM may move. A table that is not learned stays at its
-        # starting point. See hmm.py, "identifiability", for why the dead-ball table is learned
-        # only for features that physically measure a dead ball.
-        self.learn_team = learn_team
-        self.learn_dead = learn_dead
         self.values = list(values)
         self.codes = np.asarray(codes, dtype=np.int16)
         self.team_bearing = team_bearing
@@ -134,16 +128,6 @@ def centred_mean(x, half_window):
 # ------------------------------------------------------------------------------------------------
 # basic features
 # ------------------------------------------------------------------------------------------------
-def ball_feature_basic(nearest):
-    """nearest: per-frame 0 home / 1 away / -1 ball not tracked."""
-    values = ["home", "away"] + gap_values()
-    missing = nearest < 0
-    codes = np.where(missing, 2 + gap_bin(missing), nearest).astype(np.int16)
-    init_team = dict(zip(values, [0.42, 0.18, 0.06, 0.08, 0.12, 0.14]))
-    init_dead = dict(zip(values, [0.15, 0.15, 0.05, 0.10, 0.20, 0.35]))
-    return Feature("ball", values, codes, init_team, init_dead, learn_dead=False)
-
-
 # Open-play phases: the tag's Team is the team in possession ...
 ATTACKING_CODES = ("BUILD UP", "PROGRESSION", "CREATING CHANCES", "ATTACKING TRANSITION",
                    "BALL IN FINAL THIRD", "BALL IN THE BOX", "PLAYERS IN THE BOX", "LONG BALL")
@@ -170,12 +154,13 @@ def phase_feature(events, n_frames):
     values = ["none", "home", "away", "both"]
     init_team = {"none": 0.40, "home": 0.45, "away": 0.10, "both": 0.05}
     init_dead = {"none": 0.70, "home": 0.13, "away": 0.13, "both": 0.04}
-    return Feature("phase", values, codes, init_team, init_dead, learn_dead=False)
+    return Feature("phase", values, codes, init_team, init_dead)
 
 
 def kickoff_strikes(events):
-    """Video frames at which a kickoff (start of half or after a goal) is struck."""
-    return sorted(e["start"] + C.KICKOFF_STRIKE_OFFSET for e in events
+    """Video frames at which a kickoff tag (start of half or after a goal) opens. The tag's own
+    start is used, with no offset measured on any match."""
+    return sorted(e["start"] for e in events
                   if e["code"] == "SET PIECES" and e["type"].startswith("kick off"))
 
 
@@ -209,7 +194,7 @@ def setpiece_feature(events, n_frames, fractions=None):
         init_team["na_t%d" % b] = 0.004 + 0.006 * late
         init_dead["home_t%d" % b] = init_dead["away_t%d" % b] = 0.016 - 0.008 * late
         init_dead["na_t%d" % b] = 0.016 - 0.008 * late
-    return Feature("setpiece", values, codes, init_team, init_dead, learn_dead=False)
+    return Feature("setpiece", values, codes, init_team, init_dead)
 
 
 def goal_feature(events, n_frames):
@@ -235,8 +220,7 @@ def goal_feature(events, n_frames):
     # Starting point: a goal tag's last two minutes are mostly celebration and restart.
     init_team = dict(zip(values, [0.970, 0.003, 0.004, 0.008, 0.015]))
     init_dead = dict(zip(values, [0.850, 0.050, 0.040, 0.035, 0.025]))
-    return Feature("goal", values, codes, init_team, init_dead, team_bearing=False,
-                   learn_team=False, learn_dead=False)
+    return Feature("goal", values, codes, init_team, init_dead, team_bearing=False)
 
 
 # ------------------------------------------------------------------------------------------------
@@ -310,7 +294,7 @@ def ball_feature_full(t):
     codes = np.where(missing, 5 + gap_bin(missing), tracked).astype(np.int16)
     init_team = dict(zip(values, [0.22, 0.22, 0.05, 0.12, 0.05, 0.06, 0.08, 0.10, 0.10]))
     init_dead = dict(zip(values, [0.05, 0.10, 0.05, 0.10, 0.02, 0.05, 0.10, 0.20, 0.33]))
-    return Feature("ball", values, codes, init_team, init_dead, learn_dead=False)
+    return Feature("ball", values, codes, init_team, init_dead)
 
 
 def _binned(x, edges, unknown_code):
@@ -366,44 +350,5 @@ def spread_feature(t):
     codes = np.select([~np.isfinite(r), r > k, r < -k], [3, 0, 2], 1).astype(np.int16)
     init_team = {"home_wider": 0.42, "even": 0.37, "away_wider": 0.21}
     init_dead = {"home_wider": 0.32, "even": 0.36, "away_wider": 0.32}
-    return Feature("spread", values, codes, init_team, init_dead, learn_dead=False,
+    return Feature("spread", values, codes, init_team, init_dead,
                    neutral=("unknown",))
-
-
-# ------------------------------------------------------------------------------------------------
-# camera feature (homography)
-# ------------------------------------------------------------------------------------------------
-def camera_centre(homography_path, n_frames, image_size=(1920, 1080), max_error=5.0):
-    """Normalised pitch x of the point at the centre of the tactical image, NaN where unusable.
-
-    The tactical camera follows play, so where it points is a coarse location of the ball that
-    exists on every frame -- including the 41% where the ball itself is not tracked.
-    """
-    data = np.genfromtxt(homography_path, delimiter=",", names=True)
-    if len(data) != n_frames:
-        raise ValueError("homography: {} rows, expected {}".format(len(data), n_frames))
-    names = ["h%d%d" % (i, j) for i in range(3) for j in range(3)]
-    M = np.stack([data[n] for n in names], axis=1).reshape(-1, 3, 3)
-    ok = (data["valid"] == 1) & np.isfinite(M).all(axis=(1, 2)) & \
-        (data["reprojection_error"] <= max_error)
-    x = np.full(n_frames, np.nan)
-    centre = np.array([image_size[0] / 2.0, image_size[1] / 2.0, 1.0])
-    with np.errstate(all="ignore"):
-        inv = np.linalg.inv(np.where(ok[:, None, None], M, np.eye(3)))
-        p = inv @ centre
-        x = np.where(ok, p[:, 0] / p[:, 2], np.nan)
-    return x
-
-
-def camzone_feature(cam_x, home_attacks_right_by_frame):
-    """Which team's attacking third the camera is looking at (team-relative), or unknown.
-
-    home_attacks_right_by_frame: bool per frame, True where home attacks towards x = 1.
-    """
-    values = ["home_att", "mid", "away_att", "unknown"]
-    x = np.where(home_attacks_right_by_frame, cam_x, 1.0 - cam_x)  # 1 = home's attacking end
-    codes = np.select([~np.isfinite(x), x > 2.0 / 3.0, x < 1.0 / 3.0], [3, 0, 2], 1)
-    init_team = {"home_att": 0.32, "mid": 0.47, "away_att": 0.21}
-    init_dead = {"home_att": 0.32, "mid": 0.36, "away_att": 0.32}
-    return Feature("camzone", values, codes.astype(np.int16), init_team, init_dead,
-                   learn_team=False, learn_dead=False, neutral=("unknown",))

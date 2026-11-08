@@ -1,102 +1,70 @@
-"""Every tunable number in the pipeline, in one place, with the reason it has the value it has.
+"""Every constant in the pipeline, in one place, with where its value comes from.
 
-None of these values was chosen by scoring against the public 5-minute ground truth. They come from
-three sources only, and each constant says which:
+No value here was chosen by scoring against any competition data. Each constant says its source:
 
   [football]  general knowledge about the game, true of any professional match
-  [data]      a published fact about the provided files (DATA.md, FAQ.md, the ATD metadata)
+  [data]      a published fact about the provided files' format (DATA.md, the ATD metadata)
   [model]     a modelling choice (smoothness, prior strength) that is not about this match
 
-The emission tables are NOT here: they are learned by unsupervised EM on the whole match (see
-hmm.py). What is here is only their starting point and how strongly it is held.
+What the model LEARNS is not here: the feature bin edges, emission tables, transition
+probabilities and evidence scale are learned on the external games and frozen in
+models/external_params.json (strict.py). Values below marked as bin edges are only defaults that
+those learned edges replace.
 """
 
 FPS = 25
 
-# -------------------------------------------------------------------------------------------------
-# Transition model (fixed, not learned) -- per-frame probabilities derived from mean durations.
-# -------------------------------------------------------------------------------------------------
-# [football] A team spell with the ball alive lasts on average ~10-15 s in elite football once
-# "controlled" possession is required (touches and deflections do not end it). 12 s is the middle.
-MEAN_ALIVE_SPELL_S = 12.0
-# [football] Roughly a third of possession spells end in a stoppage (ball out, foul, goal), the rest
-# end in a turnover in open play.
-P_SPELL_ENDS_IN_STOPPAGE = 0.33
-# [football] A stoppage (throw-in, goal kick, foul, corner, injury, goal) lasts 10-30 s, longer for
-# goals and injuries.
-MEAN_DEAD_SPELL_S = 18.0
-
-# [model] Emission tempering exponent -- the *maximum* per-feature weight. Each feature's actual
-# weight is 1 / (mean run length of its codes), capped here; see hmm.PossessionHMM. Consecutive frames are far from independent (the nearest
-# player to the ball does not change 25 times a second), so the HMM's per-frame evidence is raised
-# to this power, which is equivalent to treating ~1 frame in 1/TEMPER as an independent observation.
-# 0.2 = "one independent look every 5 frames" (0.2 s), the order of the tracker's own smoothing.
-TEMPER = 0.2
-
-# [model] Dirichlet prior strength for each learned emission table, in pseudo-frames. Small against
-# the ~50k-frames-per-state of a full match, so the data decides; large enough that a rarely used
-# feature value cannot collapse to 0 or 1.
+# [model] Dirichlet prior strength for each emission table fitted on the external games, in
+# pseudo-frames: small against the external games' ~100k frames per state, large enough that a
+# rarely seen feature value cannot collapse to probability 0 or 1.
 PRIOR_STRENGTH = 2000.0
-# [model] Bisection steps for the evidence scale (hmm.calibrate_scale): 10 halvings of a 256x
-# range in log space pin the scale to within ~6%.
-SCALE_SEARCH_STEPS = 10
-# [model] Rounds of (calibrate scale, then EM), repeated until the scale moves by less than
-# SCALE_TOLERANCE between rounds: EM sharpens the tables, which lowers the scale needed, so the
-# two are iterated to a joint fixed point.
-MAX_CALIBRATION_ROUNDS = 8
-SCALE_TOLERANCE = 0.03
-EM_ITERATIONS = 25
-EM_TOLERANCE = 1e-6  # relative change of the tempered log-likelihood that ends EM early
 
 # -------------------------------------------------------------------------------------------------
-# Kickoffs and goals (Smart Tagging structure)
+# Goals (Smart Tagging)
 # -------------------------------------------------------------------------------------------------
-# [data] Kickoff tags are fixed 5 s windows. The two published kickoff frames (DATA.md: 11185 and
-# 113742) sit 88 and 82 frames after their tags' starts, so the ball is struck ~85 frames in.
-# Everything in a half before that point is a dead ball by definition.
-KICKOFF_STRIKE_OFFSET = 85
-
-# [football] Goal feature: seconds remaining until the restart kickoff, binned. A goal tag runs from
-# the attack that produced the goal to the kickoff after it; the celebration (and any VAR check)
-# typically takes the last 40-120 s of it. The bins let EM learn where the dead ball starts.
+# [football] Goal feature: seconds remaining until the kickoff tag after the goal, binned. A goal
+# tag runs from the attack that produced the goal to the kickoff after it; the celebration (and
+# any VAR check) typically takes the last 40-120 s of it.
 GOAL_BINS_S = (30.0, 60.0, 120.0)
 
 # -------------------------------------------------------------------------------------------------
 # Set pieces (Smart Tagging)
 # -------------------------------------------------------------------------------------------------
-# [data] Non-kickoff set-piece tags are fixed 35 s windows; the restart sits somewhere inside. Bins
-# of time since the window opened, so EM can learn where "dead" turns into "alive" on average.
+# Default bins of time since a set-piece tag opened. Not used by the submitted model, which splits
+# each tag into quarters of its own length instead (strict.SETPIECE_FRACTIONS).
 SETPIECE_BINS_S = (3.0, 8.0, 15.0)
 
 # -------------------------------------------------------------------------------------------------
 # Ball feature
 # -------------------------------------------------------------------------------------------------
-# [model] Length of the ball-missing stretch a frame sits in. The ball is missing in long blocks
-# (median ~11 s), during play and stoppages alike, so length is evidence, not a verdict.
+# Bin edges for the length of the ball-missing stretch a frame sits in. DEFAULT ONLY: replaced by
+# quartiles of the external games (models/external_params.json, "bins").
 GAP_BINS_S = (1.0, 4.0, 10.0)
 # [football] A player is "on the ball" within ~2 m of it (tracker noise included).
 CONTROL_RADIUS_M = 2.0
 
 # -------------------------------------------------------------------------------------------------
-# Kinematic features (full tracking only)
+# Kinematic features (from the tracking)
 # -------------------------------------------------------------------------------------------------
-# [data] The ATD metadata labels player speed "kph", but the values are m/s: median 1.3, 95th
-# percentile 4.6, 99.9th 8.1 -- in km/h that would be a match played at walking pace. DATA.md says
-# m/s, and the numbers agree with it.
+# [data] Unit of the tracking's speed channel (DATA.md: m/s). The submitted model does not read
+# that channel: it recomputes speeds from positions (strict.speed_from_positions), identically
+# for the external games and the match.
 SPEED_UNIT_TO_MS = 1.0
-# [football] Mean speed of the tracked players: a stoppage is walked (< ~1 m/s), open play is
-# jogged and run (~1.5-2.5 m/s mean over 22 players).
+# Bin edges for the mean speed of the tracked players (a stoppage is walked). DEFAULT ONLY:
+# replaced by fifths of the external games.
 PLAYER_SPEED_BINS_MS = (0.9, 1.3, 1.8, 2.5)
 SPEED_SMOOTH_FRAMES = 12  # +/- 0.5 s centred mean
 MIN_TRACKED_PLAYERS = 8   # below this the mean speed is not trusted
-# [football] Ball speed from consecutive positions: placed/still, rolling/dribbled, passed, struck.
+# Bin edges for ball speed from consecutive positions. DEFAULT ONLY: replaced by quartiles of the
+# external games.
 BALL_SPEED_BINS_MS = (0.7, 4.0, 12.0)
 BALL_SPEED_SMOOTH_FRAMES = 3
 # [data/football] Ball position against the lines, in metres. The ball is out once wholly over the
 # line; 0.5 m of margin absorbs tracking error.
 OUT_MARGIN_M = 0.5
 EDGE_MARGIN_M = 1.5
-# [football] The team in possession spreads out, the defending team compacts. log(area ratio) bins.
+# |log(area ratio)| below which the two teams count as equally spread (the team in possession
+# spreads out, the defending team compacts). DEFAULT ONLY: replaced by the external games' third.
 SPREAD_LOG_RATIO = 0.25
 
 # -------------------------------------------------------------------------------------------------

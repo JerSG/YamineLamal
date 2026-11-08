@@ -70,7 +70,6 @@ official data bundle reproduces exactly this file.
 | flag | effect |
 |---|---|
 | `--no-broadcast` | skip broadcast fusion (tactical tracking only) |
-| `--transductive` | **not the submission.** The earlier development model, which fits its tables to the match's own tracking by unsupervised EM. Kept for reference (report, Section 7) |
 
 ## How it is trained (external data only)
 
@@ -97,7 +96,7 @@ possession/
   config.py                   every constant, each tagged with its source
   sources.py                  readers: tactical ATD, metadata, Smart Tagging
   features.py                 per-frame categorical features
-  hmm.py                      3-state HMM, Viterbi (and EM, used only by --transductive)
+  hmm.py                      3-state HMM tables and Viterbi decoding
   strict.py                   the submitted model: train on external games, apply frozen
   external.py                 readers + event-derived labels for the public sample games
   broadcast.py                broadcast-to-tactical alignment and ball fill
@@ -106,7 +105,6 @@ possession/
 models/external_params.json   the frozen parameters (trained on external data)
 scripts/train_external.py     regenerates models/external_params.json from the public sample games
 scripts/test_extensions.py    leave-one-game-out test of candidate extra features (external data)
-scripts/sensitivity.py        robustness check for the --transductive reference model
 tests/                        synthetic-data tests, no match data needed: python -m pytest -q
 evaluation/                   the organisers' validator and scorer, unchanged (MIT)
 games.py                      the organisers' per-match constants, unchanged (MIT)

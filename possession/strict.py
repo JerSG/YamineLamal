@@ -141,8 +141,6 @@ def tag_features(events, n_frames):
     feats = [F.phase_feature(events, n_frames),
              F.setpiece_feature(events, n_frames, fractions=SETPIECE_FRACTIONS),
              F.goal_feature(events, n_frames)]
-    for f in feats:
-        f.learn_team = f.learn_dead = False
     return feats
 
 
