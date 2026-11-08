@@ -269,3 +269,20 @@ def build_html(out_path, players, ball, slot_team, label_tracks, pitch, title, s
     with open(out_path, "w", encoding="utf-8") as handle:
         handle.write(page)
     return out_path
+
+
+def write_match_page(out, players, ball, ball_filled, meta, labels, team, step=5):
+    """The competition replay page; also called by run.py with the tracking it already read."""
+    import games
+    from . import config as C
+    first = games.half_video_blocks(games.GAME)[0][1]
+    build_html(out, players, ball, meta["slot_team"], [("our labels", labels)],
+               games.GAMES[games.GAME]["pitch"],
+               title="{} vs {}".format(*meta["names"]),
+               subtitle="team {}: possession from automatic tracking".format(team),
+               footer="Tracking as provided (automatic, uncorrected); labels from {}.csv. Local "
+                      "file: the match data is licensed for the competition only, do not "
+                      "publish it.".format(team),
+               team_names=meta["names"], ball_filled=ball_filled, step=step, fps=C.FPS,
+               start_frame=first)
+    return out

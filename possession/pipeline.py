@@ -81,9 +81,12 @@ STRICT_PARAMS = os.path.join(ROOT, "models", "external_params.json")
 
 
 def run_strict(out_path=None, report_path=None, verbose=True, data_dir=None, use_broadcast=True,
-               params_path=None):
+               params_path=None, return_inputs=False):
     """The strict-external model (possession/strict.py): parameters learned on other matches,
-    applied frozen. Same inputs and ball fusion as the default model; no fitting on this match."""
+    applied frozen. Same inputs and ball fusion as the default model; no fitting on this match.
+
+    With return_inputs, also returns the tracking it read (for the replay viewer): a dict with
+    players, ball (after broadcast fill), ball_filled and meta. The labels do not depend on it."""
     from . import strict as ST
     params = ST.load(params_path or STRICT_PARAMS)
     paths = games.asset_paths(data_dir=data_dir)
@@ -102,6 +105,7 @@ def run_strict(out_path=None, report_path=None, verbose=True, data_dir=None, use
         print("reading raw tracking {} ...".format(os.path.basename(paths["atd_raw"])))
     players, ball = S.read_atd(paths["atd_raw"], len(meta["slot_team"]), n_frames)
     info = {"mode": "strict-external", "ball_fusion": fusion}
+    seen_before = np.isfinite(ball[:, 0])
     if hook is not None:
         ball, hook_info = hook(players, ball, meta)
         info.update(hook_info)
@@ -127,6 +131,10 @@ def run_strict(out_path=None, report_path=None, verbose=True, data_dir=None, use
     if report_path:
         with open(report_path, "w") as handle:
             json.dump(info, handle, indent=2, default=float)
+    if return_inputs:
+        inputs = {"players": players, "ball": ball, "meta": meta,
+                  "ball_filled": np.isfinite(ball[:, 0]) & ~seen_before}
+        return labels, info, inputs
     return labels, info
 
 

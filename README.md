@@ -49,18 +49,22 @@ python evaluation/validate_submission.py submission/YamineLamal.csv
 ```
 
 `run.py` takes about 1-2 minutes on a 4-core laptop and writes `submission/YamineLamal.csv` and
-`submission/YamineLamal_report.json`. It is deterministic: the same data and command give a
+`submission/YamineLamal_report.json`, then writes the replay page `submission/viewer.html` and
+opens it in the browser (see below). It is deterministic: the same data and command give a
 byte-identical file. The frozen parameters it uses are committed in
 `models/external_params.json`.
 
-### Watch the output (optional)
+### Watch the output
+
+`python run.py` builds the replay page automatically, after the possession file is written (the
+page never changes that file). To rebuild it on its own, or to view a public sample game:
 
 ```bash
 python scripts/view_match.py              # needs data/ and submission/YamineLamal.csv
 python scripts/view_match.py --external 1 # a public Metrica sample game, no match data needed
 ```
 
-This writes one self-contained HTML page and opens it in the browser: a 2D replay of the tracking
+The page is one self-contained HTML file: a 2D replay of the tracking
 with players coloured by team, the ball (drawn hollow where it was filled from the broadcast),
 the current label, and a full-match timeline of the labels that you can click to seek. The
 `--external` view adds a second timeline with that game's event-derived labels. The page embeds
@@ -89,6 +93,8 @@ official data bundle reproduces exactly this file.
 | flag | effect |
 |---|---|
 | `--no-broadcast` | skip broadcast fusion (tactical tracking only) |
+| `--no-viewer` | do not write the replay page |
+| `--no-open` | write the replay page but do not open the browser |
 
 ## How it is trained (external data only)
 

@@ -1,7 +1,7 @@
 """Replay the tracking with the possession labels in your browser (one self-contained HTML file).
 
-    python run.py                          # first, to write submission/YamineLamal.csv
-    python scripts/view_match.py           # competition match + our labels -> submission/viewer.html
+    python run.py                          # writes the submission AND this page (see run.py)
+    python scripts/view_match.py           # rebuild the page from submission/YamineLamal.csv
     python scripts/view_match.py --external 1   # a Metrica sample game, no match data needed
 
 The competition view shows the tracking the model read (with the ball positions filled from the
@@ -59,18 +59,8 @@ def competition(a):
             ball, _ = hook(players, ball, meta)
             filled = np.isfinite(ball[:, 0]) & ~before
     labels = read_labels(csv, n_frames)
-    first = games.half_video_blocks(games.GAME)[0][1]
     out = a.out or os.path.join(ROOT, "submission", "viewer.html")
-    V.build_html(out, players, ball, meta["slot_team"], [("our labels", labels)],
-                 games.GAMES[games.GAME]["pitch"],
-                 title="{} vs {}".format(*meta["names"]),
-                 subtitle="team {}: possession from automatic tracking".format(a.team),
-                 footer="Tracking as provided (automatic, uncorrected); labels from {}. Local "
-                        "file: the match data is licensed for the competition only, do not "
-                        "publish it.".format(os.path.basename(csv)),
-                 team_names=meta["names"], ball_filled=filled, step=a.step, fps=C.FPS,
-                 start_frame=first)
-    return out
+    return V.write_match_page(out, players, ball, filled, meta, labels, a.team, a.step)
 
 
 def external(a):
