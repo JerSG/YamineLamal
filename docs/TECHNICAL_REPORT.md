@@ -59,7 +59,7 @@ leave-one-game-out results in Section 6 show the transfer.
 | broadcast ATD + homography (competition) | input: ball positions for tactical frames without a ball (Section 4.6) | the homography is used only to find camera cuts |
 | Metrica sample games 1-3 (external) | **all training and tuning** | https://github.com/metrica-sports/sample-data |
 | tactical homography (competition) | **dropped** | a camera-zone feature was considered and dropped: no external equivalent to learn it from |
-| tactical and broadcast videos | **dropped** | see 4.7 |
+| tactical and broadcast videos | **dropped** | see 4.8 |
 | public ground truth | **not used** for the submitted model | Section 7 |
 
 **Data checks.** The tactical ATD has 199,319 contiguous records. The organisers' own
@@ -171,14 +171,29 @@ second), and the exceptions are replays, each matched to the moment it shows. Wh
 ball is missing, an aligned broadcast ball fills it (**4,763** frames). An observed tactical ball
 is never overridden. Every threshold was fixed before the first alignment ran.
 
-## 4.7 Considered and not used: ball detection in the video
+## 4.7 Handling missing and noisy tracking
+
+The competition tracking is automatic and uncorrected: it has gaps, fragmented tracks and identity
+switches, and the ball is missing on 41% of graded frames (DATA.md). Each problem is handled as
+follows.
+
+| problem | how it is handled |
+|---|---|
+| **ball missing** | where an aligned broadcast frame has the ball, it fills the gap (4.6: 4,763 frames); an observed tactical ball is never overridden. Otherwise the `ball` feature records how long the ball has been missing, in four bins learned on the external games (19 / 33 / 53 s), so a long gap is evidence of a stoppage while a short one is not. The external games have similar missingness (ball tracked on 59-68% of their graded frames), so these tables are learned under comparable conditions |
+| **possession while the ball is missing** | changing state costs a transition (learned on the external games: possessions average 12.5 s), so without contrary evidence the last team keeps possession; the slower features (Smart Tagging phases, team spread) can still move it |
+| **players missing** | features are built from whoever is tracked. A quantity that cannot be measured reliably becomes a **neutral** value, with a likelihood ratio of 1, never a guess: mean speed when fewer than 8 players are tracked, team spread when a team has fewer than 5, ball speed and ball position when the ball is missing (except "lost right after going out", which is evidence) |
+| **identity switches** | no feature follows an individual player. They use which **team** is nearest the ball and team-level aggregates, so a track slot changing player does not matter. The one per-slot quantity, speed from consecutive positions, is smoothed over ±0.2 s per player, averaged over all tracked players and smoothed again over ±0.5 s, which limits a jump in one slot to a brief, diluted blip |
+| **duplicated objects** (more than 22 tracked) | nearest-player distances are unaffected; aggregates change marginally |
+| **noise and flicker** | each feature counts as one observation per run of identical values, capped at **one per second** (4.3), and Viterbi requires enough evidence to pay for two transitions before it splits a possession. This strongly limits how far jittery tracking can fragment possessions; without the cap, the model's quality collapsed just above its best scale (4.3), and with it the curve is smooth (Section 6) |
+
+## 4.8 Considered and not used: ball detection in the video
 
 We also built a ball detector for the video, using a public model pre-trained on external images.
 It could not be validated on the external games, which have no video. We kept only components
 whose benefit we could measure without the competition ground truth, so it is not part of the
 submission or the repository.
 
-## 4.8 Extensions tested and rejected
+## 4.9 Extensions tested and rejected
 
 Four extra tracking features were tested with the same leave-one-game-out protocol on the
 external games. Everything, including each feature's thresholds, was learned on two games and
@@ -285,7 +300,7 @@ any kind from the competition match was labelled, by hand or otherwise, for trai
 * **Smart Tagging is not learned.** Its tables are fixed priors, since no external game has tags.
 * **Turnovers while the ball is untracked.** Broadcast fusion recovers 4,763 frames; elsewhere,
   only slow features (tags, spread) can move possession. Ball detection in the video could target
-  this, if it can be validated (4.7).
+  this, if it can be validated (4.8).
 * **Durations.** The model treats possession and stoppage durations as geometric. Measured on the
   external games, that is close to reality: possession lengths vary *more* than geometric
   (coefficient of variation 1.16, with 16% of possessions shorter than 2 s), and stoppages vary
