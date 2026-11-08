@@ -211,6 +211,31 @@ def test_strict_external_model_trains_and_applies_on_synthetic_data():
     assert np.isclose(ST.run_weights(flicker, [(0, 100)], min_look_frames=25).sum(), 100 / 25.0)
 
 
+def test_viewer_page_round_trips_tracking_and_labels():
+    """The replay page embeds subsampled, quantised tracking and run-length labels, and nothing
+    else is needed to open it."""
+    import base64
+    import json
+    from possession import viewer as V
+    T, slots = 101, 4
+    players = np.random.RandomState(3).uniform(0, 1, (T, slots, 3)).astype(np.float32)
+    players[7, 2] = np.nan
+    ball = players[:, 0].copy()
+    labels = np.array(["X"] * 10 + ["H"] * 40 + ["D"] * 20 + ["A"] * 31)
+    with tempfile.TemporaryDirectory() as d:
+        out = V.build_html(os.path.join(d, "v.html"), players, ball, [0, 0, 1, 1],
+                           [("ours", labels)], (105.0, 68.0), "t", step=1)
+        page = open(out, encoding="utf-8").read()
+    assert "__DATA__" not in page and "http" not in page.split("<script>")[1]   # no network
+    data = json.loads(page.split("const D = ", 1)[1].split(";\n", 1)[0])
+    q = np.frombuffer(base64.b64decode(data["players"]), dtype="<u2").reshape(T, slots, 2)
+    assert q[7, 2, 0] == V.NAN_CODE
+    ok = np.isfinite(players[..., 0])
+    assert np.allclose(q[ok] / 65534.0, players[..., :2][ok], atol=1e-4)
+    rle = data["label_tracks"][0]["rle"]
+    assert rle == [["X", 10], ["H", 40], ["D", 20], ["A", 31]]
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

@@ -1,5 +1,9 @@
 # Ball possession from automatic tracking, trained on other matches (team YamineLamal)
 
+<img alt="Animated, simulated passage of play: 22 players and the ball, with the possession label switching from home to away to dead ball and back." src="docs/assets/pitch.svg" width="100%">
+
+<sub>Simulated players, not match data (drawn by <code>scripts/make_banner.py</code>).</sub>
+
 Team **YamineLamal** submission for **More than a Hack 2027, Phase 1: Ball Possession**
 (Metrica Sports · FC Barcelona · Mobile World Capital Barcelona).
 
@@ -48,6 +52,21 @@ python evaluation/validate_submission.py submission/YamineLamal.csv
 `submission/YamineLamal_report.json`. It is deterministic: the same data and command give a
 byte-identical file. The frozen parameters it uses are committed in
 `models/external_params.json`.
+
+### Watch the output (optional)
+
+```bash
+python scripts/view_match.py              # needs data/ and submission/YamineLamal.csv
+python scripts/view_match.py --external 1 # a public Metrica sample game, no match data needed
+```
+
+This writes one self-contained HTML page and opens it in the browser: a 2D replay of the tracking
+with players coloured by team, the ball (drawn hollow where it was filled from the broadcast),
+the current label, and a full-match timeline of the labels that you can click to seek. The
+`--external` view adds a second timeline with that game's event-derived labels. The page embeds
+tracking, so it is written to `submission/` (gitignored) and is for local use only. It shows the
+output and is not a labelling tool: nothing seen in it goes back into the model, and no ground
+truth is read.
 
 ### Re-training the frozen parameters (optional)
 
@@ -102,9 +121,12 @@ possession/
   broadcast.py                broadcast-to-tactical alignment and ball fill
   extensions.py               candidate extra features, tested and not adopted (see report)
   pipeline.py                 data in, possession file out
+  viewer.py                   self-contained HTML replay of tracking + labels
 models/external_params.json   the frozen parameters (trained on external data)
 scripts/train_external.py     regenerates models/external_params.json from the public sample games
 scripts/test_extensions.py    leave-one-game-out test of candidate extra features (external data)
+scripts/view_match.py         writes and opens the replay page (local only)
+scripts/make_banner.py        draws docs/assets/pitch.svg, the simulated README banner
 tests/                        synthetic-data tests, no match data needed: python -m pytest -q
 evaluation/                   the organisers' validator and scorer, unchanged (MIT)
 games.py                      the organisers' per-match constants, unchanged (MIT)
