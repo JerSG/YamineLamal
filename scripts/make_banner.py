@@ -94,12 +94,12 @@ def svg():
     o = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {:.0f} {:.0f}" width="100%" '
          'role="img" aria-label="Simulated passage of play: the possession label switches from '
          'home to away to dead ball and back to home">'.format(w_svg, h_svg),
-         '<title>Who has the ball? A simulated passage of play, labelled H, A or D</title>',
+         '<title>H, A, D frame by frame: a simulated passage of play with its possession labels</title>',
          '<rect width="100%" height="100%" rx="14" fill="#0f1720"/>',
          '<text x="{:.0f}" y="40" fill="#e6edf3" font-family="system-ui,-apple-system,Segoe UI,'
-         'Roboto,sans-serif" font-size="26" font-weight="700">Who has the ball?</text>'.format(MX),
+         'Roboto,sans-serif" font-size="26" font-weight="700">H · A · D, frame by frame</text>'.format(MX),
          '<text x="{:.0f}" y="62" fill="#8b98a5" font-family="system-ui,-apple-system,Segoe UI,'
-         'Roboto,sans-serif" font-size="14">team YamineLamal · one label per frame · '
+         'Roboto,sans-serif" font-size="14">team YamineLamal · possession from automatic tracking · '
          'simulated players, not match data</text>'.format(MX)]
     # pitch
     for i in range(12):
