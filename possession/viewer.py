@@ -26,7 +26,7 @@ PAGE = r"""<!doctype html>
 <title>__TITLE__</title>
 <style>
   :root { --bg:#0f1720; --panel:#17212c; --text:#e6edf3; --muted:#8b98a5; --line:rgba(255,255,255,.55);
-          --grass:#1f6b3a; --grass2:#226f3d; --home:#4da3ff; --away:#ffb020; --dead:#9aa4ae; --ball:#ffffff; }
+          --grass:#1f6b3a; --grass2:#226f3d; --home:#3b82f6; --away:#e3262b; --dead:#9aa4ae; --ball:#ffffff; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--text);
          font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
@@ -289,10 +289,10 @@ def build_html(out_path, players, ball, slot_team, label_tracks, pitch, title, s
     return out_path
 
 
-# The competition match's club colours, for the player dots: home blue and garnet, away red and
-# white stripes. The labels and timelines use one colour per team.
-MATCH_KITS = (("#2f6fde", "#a50044"), ("#e3262b", "#ffffff"))
+# Team colours for the competition match: home blue, away red, for the player dots, the labels
+# and the timelines alike.
 MATCH_COLOURS = ("#3b82f6", "#e3262b")
+MATCH_KITS = ((MATCH_COLOURS[0], MATCH_COLOURS[0]), (MATCH_COLOURS[1], MATCH_COLOURS[1]))
 
 
 def write_match_page(out, players, ball, ball_filled, meta, labels, team, step=5):
