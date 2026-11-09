@@ -10,28 +10,35 @@ date: "November 2026"
 We label every frame of FC Barcelona vs Athletic Club `H`, `A` or `D` with a **three-state hidden
 Markov model** (home in possession, away in possession, dead ball) decoded by Viterbi.
 
-**Every learned or tuned number comes from other matches.** The model is trained on Metrica Sports'
-three public sample games, with labels derived mechanically from their event data. It is then
-frozen and applied unchanged to the competition match. That covers the feature bin edges, the
-emission probabilities, the transition probabilities and the one evidence scale. The competition
-match's automatic tracking, Smart Tagging and broadcast recording are used **as input only**.
-No ground truth, no video and no human-produced data about the match are used to fit, tune or
-check the submitted model. This follows the organisers' rules clarification: *"If you need to train (or
-retrain), you MUST use only external data."*
+**Every learned or tuned number comes from other matches.** The model is trained on ten external
+matches: Metrica Sports' three public sample games and the seven matches of the DFL open data
+(Bassek et al. 2025, CC BY 4.0). It is then frozen and applied unchanged to the competition
+match. That covers the feature bin edges, a team-shape model, the emission probabilities, the
+transition probabilities and the one evidence scale. The competition match's automatic tracking,
+Smart Tagging and broadcast recording are used **as input only**. No ground truth, no video and
+no human-produced data about the match are used to fit, tune or check the submitted model. This
+follows the organisers' rules clarification: *"If you need to train (or retrain), you MUST use
+only external data."*
 
 Main components:
 
+* **Labels that match the ground truth's definition.** The competition's ground truth is "`D`
+  where the corrected tracking marks the ball dead, otherwise the team the tracking names"
+  (CHALLENGE.md). The DFL open data carries exactly that, frame by frame, from its tracking, so
+  the model learns the same notion of possession and dead ball.
 * **Two-camera fusion.** The broadcast recording is aligned to the tactical timeline
-  automatically, shot by shot, by matching player positions (no mapping is provided). Its ball
-  then fills tactical frames where the tracker lost the ball.
-* **Eight per-frame categorical features**: five physical ones from the tracking and three from
-  the Smart Tagging.
+  automatically, shot by shot, by matching player positions. Its ball then fills tactical frames
+  where the tracker lost the ball.
+* **Eleven per-frame categorical features**: eight from the tracking (including the team that
+  last touched the ball, a team-shape model for frames without a ball, and a still ball) and
+  three from the Smart Tagging.
 * **A cap on evidence:** each feature counts as one observation per run of identical values, and
-  never more than one per second. This keeps the frozen model stable on tracking noisier than
-  the data it was trained on.
-* **Generalisation between matches:** trained on two external games and tested on the unseen
-  third, spellF1 is **0.572 / 0.576 / 0.567** (macroF1 0.789 / 0.778 / 0.816), against that
-  game's event-derived labels.
+  never more than one per second, which keeps the frozen model stable on noisier tracking.
+* **A benchmark on external matches** (Section 6): every design choice was kept only if it raised
+  the held-out spellF1 under five kinds of simulated tracking gaps, and the final model was then
+  confirmed once on two DFL matches held back from all development. There it scores **0.500**
+  against **0.320** for our first model (trained on Metrica only, without the three new
+  features).
 
 There is no competition score to report: the ground truth is private, and we did not evaluate the
 submitted model against the public 5-minute window (Section 7).
@@ -46,9 +53,9 @@ of a transition, so a short burst of contrary evidence cannot split a possession
 strong enough to pay for two transitions.
 
 The rules require training and tuning on external data only. A small, interpretable model with
-few parameters transfers between matches far more safely than a large one: eight categorical
-features, a 3×3 transition matrix and one scale, all estimated on three external games. The
-leave-one-game-out results in Section 6 show the transfer.
+few parameters transfers between matches far more safely than a large one: eleven categorical
+features, one 25-weight logistic model, a 3×3 transition matrix and one scale, all estimated on
+ten external matches. The held-out results in Section 6 show the transfer.
 
 # 3. Assets: used and dropped
 
@@ -57,7 +64,8 @@ leave-one-game-out results in Section 6 show the transfer.
 | tactical ATD `_atd.txt` + `.xml` (competition) | input: player and ball positions, which slot belongs to which team | player speeds are recomputed from positions, as the external games have no speed channel |
 | Smart Tagging (competition) | input: open-play phases, set pieces, goals, kickoffs | fixed prior tables, nothing learned |
 | broadcast ATD + homography (competition) | input: ball positions for tactical frames without a ball (Section 4.6) | the homography is used only to find camera cuts |
-| Metrica sample games 1-3 (external) | **all training and tuning** | https://github.com/metrica-sports/sample-data |
+| Metrica sample games 1-3 (external) | training and tuning | https://github.com/metrica-sports/sample-data |
+| DFL open data, 7 matches (external) | training, tuning and the benchmark | Bassek et al. 2025, CC BY 4.0 (Section 8) |
 | tactical homography (competition) | **dropped** | a camera-zone feature was considered and dropped: no external equivalent to learn it from |
 | tactical and broadcast videos | **dropped** | see 4.8 |
 | public ground truth | **not used** for the submitted model | Section 7 |
@@ -71,7 +79,7 @@ has 164,488 contiguous records, matching DATA.md.
 
 ## 4.1 External training data and labels
 
-Metrica Sports' public sample games are three anonymised professional matches, about 4.8 hours
+**Metrica Sports' public sample games.** They are three anonymised professional matches, about 4.8 hours
 (429,923 frames) at 25 fps, with tracking of players and ball and with event data. Games 1 and 2 come in
 Metrica's CSV format; game 3 is in FIFA EPTS, the competition's format, which we read with its
 per-substitution data-format sections. The ball is tracked on 61%, 59% and 68% of their graded
@@ -88,6 +96,16 @@ Labels are derived from the events mechanically (`possession/external.py`):
 The result looks like football: 294-343 possessions per game with a mean of 11.7-13.7 s, and
 75-78 stoppages.
 
+**DFL open data.** Seven Bundesliga and 2. Bundesliga matches with optical tracking at 25 fps
+(about 1,000,000 frames). On every frame the tracking provider records `BallStatus` (in play or
+dead) and `BallPossession` (home or guest): the same kind of label as the competition's ground
+truth, so the labels are read directly, with no derivation (`possession/dfl.py`). The DFL event
+files are not used. The DFL ball is tracked almost always, unlike the competition's, so ball gaps
+are added before training: a two-state chain whose probabilities are measured on the Metrica
+games, separately for live and dead play (`possession/degrade.py`, profile `markov`). The DFL
+labels give shorter possessions (mean 7 s) and more dead ball (41-52% of frames) than the
+event-derived Metrica labels (26-35%).
+
 ## 4.2 Features (one categorical value per frame)
 
 | feature | values | what it measures |
@@ -97,16 +115,43 @@ The result looks like football: 294-343 possessions per game with a mean of 11.7
 | `bspeed` | 4 bins of ball speed | a placed ball is slow |
 | `bpos` | in, edge, out, lost right after going out | ball against the touch and goal lines |
 | `spread` | home wider, even, away wider | the team in possession opens the pitch |
+| `lasttouch` | home, away (or unknown) | the team that last touched the ball (below) |
+| `shape` | strong home, home, even, away, strong away | a team-shape model's verdict (below) |
+| `still` | still at a restart place, still in open play, moving | a placed ball |
 | `phase` | none, home, away, both | Smart Tagging phases mapped to "team attacking" (Build Up, Progression, Creating Chances, … name the attacker; Defending tags name the defender) |
 | `setpiece` | taker (home / away / not tagged) × quarter of the tag | set-piece windows |
 | `goal` | time left until the kickoff after a goal | celebration and restart |
 
 **Bin edges are learned on the external games** as equal-share quantiles (a fixed rule set before
-seeing any data). Ball-missing stretch length uses the quartiles 19 / 33 / 53 s. Mean player
-speed uses the fifths 1.0 / 1.4 / 1.9 / 2.5 m/s. Ball speed uses the quartiles 2.7 / 6.2 /
-11.1 m/s. The spread threshold is the third of |log ratio| (0.35). The only physical constants are
-general football facts, not tuned on any data: a player is "on the ball" within 2 m, and the ball
-is out once 0.5 m over a line.
+seeing any data). Ball-missing stretch length uses the quartiles 19 / 32 / 54 s (frame-weighted,
+so long dead-ball gaps dominate). Mean player speed uses the fifths 1.0 / 1.4 / 1.9 / 2.6 m/s.
+Ball speed uses the quartiles 2.7 / 5.8 / 10.5 m/s. The spread threshold is the third of |log
+ratio| (0.31). The physical constants are general football facts, not tuned on any data: a player
+is "on the ball" within 2 m, and the ball is out once 0.5 m over a line.
+
+**Last touch** (`possession/touch.py`). A pass, a reception or a block changes the ball's
+velocity by several m/s in a fraction of a second. With the velocity over 0.48 s before and after
+each frame, a touch is a local peak of the change above 3 m/s, given to a team when one of its
+players is within 2 m of the ball around the peak and at least 0.75 m closer than any opponent.
+The touching team is carried forward until the next touch, a contested touch, or the ball being
+missing for over a second: a loose ball stays with the team that last played it. On the training
+data it agrees with the label on 97% of the live frames it covers (69% of them).
+
+**Team shape** (`possession/shape.py`). Where the ball is not seen, the teams still show who has
+it: the side in possession pushes up, spreads and moves forward. Five home-minus-away differences
+(forward position of the centroid, spread in x and in y, mean speed, forward velocity), oriented
+by each team's direction of attack, are taken over five time windows (1 s and 4 s centred, and
+2 s shifted 1 s and 2 s ahead and 1 s back, since a team reacts late). A logistic regression
+without intercept maps the 25 columns to P(home has the ball); every column changes sign when the
+teams are exchanged, so the model is exactly antisymmetric and cannot carry a preference for
+either side. It is fitted on the live frames of the external matches (training accuracy 85%) and
+its logit is binned at fixed edges (±0.5, ±2). On frames where it is not "even" it agrees with
+the label 88% of the time, and 75% where the ball is missing.
+
+**Still ball** (`possession/deadball.py`). A ball tracked and slower than 1 m/s for at least
+1 s, at a restart place (within 2 m of a line, within 2.5 m of the centre spot or a penalty spot,
+or in a goal area) or elsewhere. Players walk on 47.5% of dead frames against 3.7% of live ones;
+a still ball is 6.4% of dead frames against 2.5% of live ones.
 
 ## 4.3 Model
 
@@ -126,18 +171,16 @@ States `H`, `A` and `D`. Emissions are a product over features:
 
 ## 4.4 Training on the external games
 
-All estimated on games 1-3, then frozen in `models/external_params.json`:
+All estimated on the ten external matches, then frozen in `models/external_params.json`:
 
-1. **Emission tables:** supervised counts per state from the event-derived labels, tied as above,
-   with a mild Dirichlet prior. They are physically sensible. Players are under 1 m/s on 46.8% of
-   dead frames against 8.4% of live ones. Among frames where the ball's position is known or it was
-   last seen over a line, "lost right after going out" is 84.4% of dead frames against 5.2% of
-   live ones. A ball-missing stretch covers 90%
-   of dead frames against 15% of live ones.
-2. **Transitions**, measured from the labels' own spells: mean possession 12.5 s, 24% of
-   possessions ending in a stoppage, mean stoppage 22.7 s.
-3. **Evidence scale:** the value on a fixed grid with the best mean spellF1 over the three games,
-   computed with the organisers' own `possession_metrics.py`: **6.0**.
+1. **Team-shape model:** the logistic regression above, on every fifth live frame.
+2. **Emission tables:** supervised counts per state from the labels, tied as above, with a mild
+   Dirichlet prior. They are physically sensible: for example, the ball is missing on 91.5% of
+   dead frames against 16.1% of live ones.
+3. **Transitions**, measured from the labels' own spells: mean possession 8.5 s, 23% of
+   possessions ending in a stoppage, mean stoppage 25.0 s.
+4. **Evidence scale:** the value on a fixed grid with the best mean spellF1 over the ten matches,
+   computed with the organisers' own `possession_metrics.py`: **8.0**.
 
 ## 4.5 Applying the frozen model to the competition match
 
@@ -179,11 +222,12 @@ follows.
 
 | problem | how it is handled |
 |---|---|
-| **ball missing** | where an aligned broadcast frame has the ball, it fills the gap (4.6: 4,763 frames); an observed tactical ball is never overridden. Otherwise the `ball` feature records how long the ball has been missing, in four bins learned on the external games (19 / 33 / 53 s), so a long gap is evidence of a stoppage while a short one is not. The external games have similar missingness (ball tracked on 59-68% of their graded frames), so these tables are learned under comparable conditions |
-| **possession while the ball is missing** | changing state costs a transition (learned on the external games: possessions average 12.5 s), so without contrary evidence the last team keeps possession; the slower features (Smart Tagging phases, team spread) can still move it |
-| **players missing** | features are built from whoever is tracked. A quantity that cannot be measured reliably becomes a **neutral** value, with a likelihood ratio of 1, never a guess: mean speed when fewer than 8 players are tracked, team spread when a team has fewer than 5, ball speed and ball position when the ball is missing (except "lost right after going out", which is evidence) |
-| **identity switches** | no feature follows an individual player. They use which **team** is nearest the ball and team-level aggregates, so a track slot changing player does not matter. The one per-slot quantity, speed from consecutive positions, is smoothed over ±0.2 s per player, averaged over all tracked players and smoothed again over ±0.5 s, which limits a jump in one slot to a brief, diluted blip |
+| **ball missing** | where an aligned broadcast frame has the ball, it fills the gap (4.6: 4,763 frames); an observed tactical ball is never overridden. Otherwise the `ball` feature records how long the ball has been missing, in four bins learned on the external games (19 / 32 / 54 s), so a long gap is evidence of a stoppage while a short one is not. The training data has comparable missingness: the Metrica games track the ball on 59-68% of graded frames, and the DFL matches get gaps simulated from the Metrica tracking |
+| **possession while the ball is missing** | the `lasttouch` feature carries the team that last played the ball through short gaps, and the team-shape model gives evidence on frames without a ball (75% agreement there on the training data); a change of state also costs a transition, so without contrary evidence the last team keeps possession |
+| **players missing** | features are built from whoever is tracked. A quantity that cannot be measured reliably becomes a **neutral** value, with a likelihood ratio of 1, never a guess: mean speed when fewer than 8 players are tracked, team spread when a team has fewer than 5, ball speed, ball position and still ball when the ball is missing (except "lost right after going out", which is evidence), team shape when a team has fewer than 5 players tracked, last touch after a second without a ball |
+| **identity switches** | no feature follows an individual player. They use which **team** is nearest the ball and team-level aggregates (the team-shape model included), so a track slot changing player does not matter. The one per-slot quantity, speed from consecutive positions, is smoothed over ±0.2 s per player, averaged over all tracked players and smoothed again over ±0.5 s, which limits a jump in one slot to a brief, diluted blip |
 | **duplicated objects** (more than 22 tracked) | nearest-player distances are unaffected; aggregates change marginally |
+| **smoothed ball** | the competition's automatic ball track is smoothed over about a second, which blurs touches. Touches are measured over 0.48 s chords, and the benchmark includes a profile with the ball smoothed over 1 s (Section 6), where the model keeps its advantage |
 | **noise and flicker** | each feature counts as one observation per run of identical values, capped at **one per second** (4.3), and Viterbi requires enough evidence to pay for two transitions before it splits a possession. This strongly limits how far jittery tracking can fragment possessions; without the cap, the model's quality collapsed just above its best scale (4.3), and with it the curve is smooth (Section 6) |
 
 ## 4.8 Considered and not used: ball detection in the video
@@ -193,22 +237,22 @@ It could not be validated on the external games, which have no video. We kept on
 whose benefit we could measure without the competition ground truth, so it is not part of the
 submission or the repository.
 
-## 4.9 Extensions tested and rejected
+## 4.9 Features tested and rejected
 
-Four extra tracking features were tested with the same leave-one-game-out protocol on the
-external games. Everything, including each feature's thresholds, was learned on two games and
+Before the benchmark of Section 6 existed, with the first model (Metrica only), four extra
+tracking features were tested with a leave-one-game-out protocol on the three Metrica games. Everything, including each feature's thresholds, was learned on two games and
 scored on the third (`scripts/test_extensions.py`, `possession/extensions.py`):
 
 | features | game 1 | game 2 | game 3 | mean |
 |---|---|---|---|---|
-| **submitted model** | 0.572 | 0.576 | 0.567 | **0.572** |
+| **first model** | 0.572 | 0.576 | 0.567 | **0.572** |
 | + pressure (players within 5 m of the ball) | 0.536 | 0.519 | 0.520 | 0.525 |
 | + territory (attacking third) | 0.574 | 0.559 | 0.570 | 0.568 |
 | + advance (team moving forward) | 0.570 | 0.578 | 0.573 | 0.574 |
 | + carrier (duration on the ball) | 0.563 | 0.561 | 0.561 | 0.561 |
 | + all four | 0.530 | 0.536 | 0.537 | 0.534 |
 
-None improves the held-out games reliably. Pressure and carrier largely repeat the ball feature,
+None improved the held-out games reliably. Pressure and carrier largely repeat the ball feature,
 which double-counts the same evidence and fragments possessions. Advance's +0.002 is far below the
 noise of a three-game test. None was adopted.
 
@@ -220,14 +264,22 @@ its strength setting changing between folds (0.10 and 0.20). The +0.017 mean is 
 of a three-game test, and the classifier has no cap on evidence for tracking noisier than its
 training data, so it was not adopted.
 
+On the benchmark of Section 6, three more were rejected: the momentary touch itself (as opposed
+to the last touch: no gain once `lasttouch` is in), and "gap context" (where the ball was lost and
+where it reappears), which separates dead from live play well (57% of dead frames are "lost at a
+line, back at a restart place" against 6% of live ones) but adds nothing measurable once `still`
+and the existing ball features are in (+0.0005).
+
 # 5. Possession rules as implemented
 
 * **Ball alive or dead:** dead where the physical evidence of a stoppage outweighs the cost of
-  entering and leaving `D`. That evidence is walking players, a slow ball or one over a line, the
-  ball lost right after going out, the early part of a set-piece tag, or a goal celebration.
+  entering and leaving `D`. That evidence is walking players, a slow or still ball (more so at a
+  restart place) or one over a line, the ball lost right after going out, a long ball gap, the
+  early part of a set-piece tag, or a goal celebration.
   Before each kickoff tag it is dead by rule.
-* **Loose and contested balls** do not change possession by themselves. A change needs the other
-  team to be on or nearest the ball for long enough to pay for a transition. A deflection or a
+* **Loose and contested balls** do not change possession by themselves: the last team to touch
+  the ball keeps it, and a contested touch clears the last-touch evidence. A change needs the other
+  team to touch or be on the ball, with enough evidence to pay for a transition. A deflection or a
   lost aerial duel without follow-up control is not enough, which is the challenge's "controlled
   possession" rule.
 * **Restarts:** either team may restart, with equal prior. The team is decided by who is on the
@@ -236,32 +288,55 @@ training data, so it was not adopted.
 
 # 6. Results
 
-**External games, leave-one-game-out.** For each game, everything (bin edges, tables,
-transitions, scale) is learned on the other two and tested on it:
+**The benchmark** (`scripts/benchmark.py`, external matches only). The decision rule was written
+down before the runs: a change is kept when its mean spellF1 on the DFL development matches is
+higher (their labels are made the way the ground truth is), its Metrica mean is not more than
+0.03 lower, and the final check does not reverse the gain.
 
-| held-out game | spellF1 | macroF1 | scale chosen on the other two |
+* **Development:** the three Metrica games and five DFL matches. For each one, everything (bin
+  edges, team-shape model, tables, transitions, scale) is learned on the other development
+  matches and the held-out one is decoded and scored with the organisers' spellF1. Metrica games
+  are scored with their own tracking gaps. DFL matches are scored under five gap profiles
+  (`possession/degrade.py`), each with three seeds: `markov` (gaps as on the Metrica tracking),
+  `short` (mean 0.5 s), `long` (4 s), `crowded` (2 s, starting where players crowd the ball),
+  each removing 41% of the ball as DATA.md reports, and `smooth` (markov gaps, ball smoothed
+  over 1 s, as the competition's ball is).
+* **Final check:** two DFL matches (J03WQQ and J03WR9, the last two by id) were held back from all
+  development and scored once, with the model trained on every development match.
+
+| model | Metrica dev | DFL dev | DFL reserved |
 |---|---|---|---|
-| Sample Game 1 | 0.572 | 0.789 | 6.0 |
-| Sample Game 2 | 0.576 | 0.778 | 6.0 |
-| Sample Game 3 | 0.567 | 0.816 | 8.0 |
+| A: first model (Metrica only, five tracking features) | **0.572** | 0.286 | 0.320 |
+| B: A trained on Metrica + DFL | 0.556 | 0.328 | 0.371 |
+| F: B + last touch + team shape | 0.668 | 0.442 | 0.483 |
+| **I: F + still ball (submitted)** | 0.650 | **0.458** | **0.500** |
 
-**Scale curve with all three games** (mean spellF1): 0.27 at scale 2, 0.51 at 4, **0.58 at 6**,
-0.57 at 8, 0.54 at 10, 0.47 at 14. It is smooth on both sides, so a moderately wrong scale costs
-little. That matters, because the competition match cannot be used to check the scale.
+Mean spellF1; DFL figures are means over matches, profiles and seeds. Each step raised the DFL
+mean on every development match. The submitted model is better than A on all five DFL
+development matches (0.433-0.474 against 0.236-0.313), under every profile (markov 0.514, short
+0.454, long 0.464, crowded 0.435, smooth 0.423, against 0.337 / 0.284 / 0.254 / 0.226 / 0.326),
+and on both reserved matches (0.514 and 0.487 against 0.328 and 0.311; macroF1 0.818 and 0.829
+against 0.696 and 0.721). On Metrica it is 0.633 / 0.643 / 0.673 against 0.572 / 0.576 / 0.567.
 
-These labels follow event-data conventions, not the competition's corrected-tracking ground
-truth, so the numbers show transfer between matches; they do not predict the competition score.
+**Before the reserved matches were set aside,** two earlier explorations had already scored all
+seven DFL matches: training on Metrica + DFL (better on 7 of 7) and the "gap context" feature (no
+gain). The reserved matches were therefore not untouched by every decision, but none of the
+features of models F and I had been run on them before the final check.
 
-**Full match.** The submitted file has 350 possessions (mean 12.2 s) and 100 stoppages, with
-frames H 61,331 / A 45,004 / D 52,522 (33% of graded frames dead). Compared with the tactical
-tracking alone (334 possessions, 54,028 dead frames), broadcast fusion adds 16 possessions and
-reduces dead-ball frames by 1,506 (net). The dead share is within the external matches' range
-(26-35%), and the possession count is slightly above it (294-343).
+**Scale curve with all ten matches** (mean spellF1): 0.41 at scale 2, 0.55 at 4, 0.567 at 6,
+**0.570 at 8**, 0.561 at 10, 0.523 at 16. It is flat around the optimum, so a moderately wrong
+scale costs little.
 
-**Reproducibility.** The pipeline has no randomness. Two runs of `run.py` on the match data, in
-different Python environments, gave the identical result. The submitted file's SHA-256 is
-`6f0b718333586546f61ded5ddd58e2ca8b30307ba9975e69ec12972cb4c88a72`. Re-training on the external
-games gives a byte-identical `external_params.json`.
+These scores show transfer between matches; they do not predict the competition score, which
+depends on that match's tracking and its own ground truth.
+
+**Full match.** `run.py` prints the output's possession and stoppage counts and a set of
+label-free checks (ball-missing shares in live and dead output, dead share per half, coverage of
+the last-touch and team-shape features), stored in `submission/YamineLamal_report.json`.
+
+**Reproducibility.** The pipeline has no randomness. Two runs of `run.py` on the same data give
+the identical file. Re-training on the external matches gives the same `external_params.json` on
+the same platform.
 
 # 7. Use of the provided data and the ground truth
 
@@ -273,33 +348,44 @@ games gives a byte-identical `external_params.json`.
   of its parameters comes from it. Our only use of the public ground truth was early in
   development: looking at its segments to understand what counts as possession, and as a smoke
   test of early versions of the pipeline.
-* **No constant is measured on the match:** every bin edge is learned on the external games, and
-  the kickoff and goal features use the Smart Tagging's own tag boundaries, with no offset.
+* **No constant is measured on the match:** every bin edge and the team-shape model are learned
+  on the external matches, and the kickoff and goal features use the Smart Tagging's own tag
+  boundaries, with no offset. The only figure taken from the organisers' documents is the 41%
+  ball-missing share (DATA.md) used to simulate gaps in the external benchmark.
 * **Fixed rules and priors** (not tuned on any data): the Smart Tagging prior tables, the quantile
   levels, the one-observation-per-second cap, the set-piece quarters, the 2 m control radius and
-  the broadcast thresholds. Some were written down while working on this project. None was chosen
+  the broadcast thresholds, the touch and still-ball thresholds and the restart places. Some were
+written down while working on this project. None was chosen
   by scoring against any competition data.
 
 # 8. Training data
 
 | dataset | used for | source and labelling | size |
 |---|---|---|---|
-| **Metrica Sports sample games 1-3** | all training and tuning of the submitted model | public, https://github.com/metrica-sports/sample-data. Tracking by Metrica; event data collected manually by Metrica; our possession labels derived from those events by code | 3 matches, ~430,000 frames |
+| **Metrica Sports sample games 1-3** | training and tuning | public, https://github.com/metrica-sports/sample-data. Tracking by Metrica; event data collected manually by Metrica; our possession labels derived from those events by code | 3 matches, ~430,000 frames |
+| **DFL open data (IDSSE)** | training, tuning and the benchmark | Bassek, M., Rein, R., Weber, H., Memmert, D. (2025). An integrated dataset of spatiotemporal and event data in elite soccer. *Scientific Data* 12, 195. doi:10.1038/s41597-025-04505-y. Data © Deutsche Fußball Liga, CC BY 4.0, https://doi.org/10.6084/m9.figshare.28196177. Labels are the tracking's own ball status and possession; the event files are not used | 7 matches, ~1,000,000 frames |
 
 The Metrica sample repository has no formal licence file; its README provides the data for the
 analytics community and asks public users to acknowledge the source, which we do here. No data of
-any kind from the competition match was labelled, by hand or otherwise, for training.
+any kind from the competition match was labelled, by hand or otherwise, for training. Neither
+dataset is redistributed: `scripts/download_dfl.py` and the Metrica clone fetch them from the
+source.
 
 # 9. Limitations
 
-* **Domain gap.** The external games come from Metrica's tracking of other matches; the
-  competition tracking is automatic and noisier. The evidence cap and the smooth scale curve limit
-  the damage, but frozen tables cannot adapt to this match's noise.
-* **Different label conventions.** Event-derived possessions are not exactly the competition's
-  ground truth (derived from corrected tracking), so the external scores do not predict ours.
+* **Domain gap.** The external matches come from other trackers and leagues; the competition
+  tracking is automatic, fragmented and noisier. The DFL gaps are simulated, not real tracker
+  failures. The evidence cap, the five gap profiles and the flat scale curve limit the risk, but
+  frozen tables cannot adapt to this match's noise.
+* **Label conventions.** DFL's tracking-based labels follow the same definition as the ground
+  truth, but each provider applies it its own way, and the Metrica labels are event-derived. The
+  external scores therefore show transfer; they do not predict ours.
+* **A small final check.** Two reserved matches are strong evidence of direction (the gain held on
+  both, under every profile), not a precise estimate of its size.
 * **Smart Tagging is not learned.** Its tables are fixed priors, since no external game has tags.
 * **Turnovers while the ball is untracked.** Broadcast fusion recovers 4,763 frames; elsewhere,
-  only slow features (tags, spread) can move possession. Ball detection in the video could target
+  the team-shape model and the slower features have to move possession, and the shape model is
+  right less often without the ball (75%) than with it. Ball detection in the video could target
   this, if it can be validated (4.8).
 * **Durations.** The model treats possession and stoppage durations as geometric. Measured on the
   external games, that is close to reality: possession lengths vary *more* than geometric
@@ -316,7 +402,12 @@ pip install -r requirements.txt
 python run.py                                  # ~1-2 minutes; deterministic
 python evaluation/validate_submission.py submission/YamineLamal.csv
 python -m pytest -q tests                      # synthetic-data tests, no match data needed
-# optional: regenerate the frozen parameters from the public external data
+# optional: the same in a pinned container (Dockerfile)
+docker build -t yaminelamal .
+docker run --rm -v "$PWD/data:/app/data:ro" -v "$PWD/submission:/app/submission" yaminelamal
+# optional: re-train and re-run the benchmark from the public external data
 git clone https://github.com/metrica-sports/sample-data external/metrica-sample-data
-python scripts/train_external.py
+python scripts/download_dfl.py                 # DFL open data, ~2.6 GB
+python scripts/train_external.py               # rewrites models/external_params.json
+python scripts/benchmark.py                    # held-out results of Section 6
 ```

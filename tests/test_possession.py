@@ -3,6 +3,7 @@
     python -m pytest -q tests          # or:  python tests/test_possession.py
 """
 
+import json
 import os
 import sys
 import tempfile
@@ -139,10 +140,13 @@ def test_broadcast_alignment_recovers_offset_and_rejects_garbage():
 
 
 def test_strict_external_model_trains_and_applies_on_synthetic_data():
-    """Strict mode: tables/transitions from labelled 'external' games, scale tuned there, then
-    applied frozen to a new 'match' (synthetic data only, no competition data)."""
+    """Train on labelled synthetic 'external' games through the real training path (bins,
+    team-shape model, tables, transitions, scale), then apply the result frozen to a new
+    synthetic 'match' (no competition data anywhere)."""
     from possession import strict as ST
-    rng = np.random.RandomState(5)
+    n_side = 5
+    slot_team = np.array([0] * n_side + [1] * n_side, dtype=np.int8)
+    pitch = (105.0, 68.0)
 
     def game(seed, T=6000):
         r = np.random.RandomState(seed)
@@ -158,33 +162,26 @@ def test_strict_external_model_trains_and_applies_on_synthetic_data():
                 t += m
             team = r.randint(0, 2) if lab[min(t, T) - 1] == 2 else 1 - team
         lab = lab[:T]
-        players = np.full((T, 4, 3), np.nan, dtype=np.float32)
-        base = r.uniform(0.3, 0.7, (4, 2))
-        drift = np.cumsum(r.normal(0, 0.0008, (T, 4, 2)) * np.where(lab == 2, 0.2, 1.5)[:, None, None], 0)
+        P = 2 * n_side
+        players = np.full((T, P, 3), np.nan, dtype=np.float32)
+        base = r.uniform(0.3, 0.7, (P, 2))
+        drift = np.cumsum(r.normal(0, 0.0008, (T, P, 2)) *
+                          np.where(lab == 2, 0.2, 1.5)[:, None, None], 0)
         players[..., :2] = np.clip(base + drift, 0.02, 0.98)
         ball = np.full((T, 3), np.nan, dtype=np.float32)
-        owner = np.where(lab == 1, 2, 0)
+        owner = np.where(lab == 1, n_side, 0)
         ball[:, :2] = players[np.arange(T), owner, :2] + 0.004
         ball[r.rand(T) < 0.35] = np.nan
-        return players, ball, lab
+        return {"name": "synthetic{}".format(seed), "players": players, "ball": ball,
+                "slot_team": slot_team}, lab
 
-    slot_team = np.array([0, 0, 1, 1], dtype=np.int8)
-    pitch = (105.0, 68.0)
     ext = [game(s) for s in (1, 2)]
-    labs = [lab for _, _, lab in ext]
-    summaries = [ST.summarise(p, b, slot_team, pitch) for p, b, _ in ext]
-    bins = ST.derive_bins(summaries, labs)              # bins from the 'external' games only
-    with ST.use_bins(bins):
-        feats = [ST.tracking_features(None, None, None, None, summary=t) for t in summaries]
-    tables = ST.fit_tables(feats, labs)
-    trans, stats = ST.fit_transitions(labs)
-    assert 5 < stats["mean_alive_spell_s"] < 30
-    scale, curve = ST.tune_scale(feats, labs, tables, trans, grid=(2.0, 6.0, 16.0))
-    params = {"bins": bins,
-              "features": {f.name: {"values": f.values, "table": t.tolist()}
-                           for f, t in zip(feats[0], tables)},
-              "transitions": trans.tolist(), "scale": scale}
-    p, b, lab = game(9)
+    params = ST.train([g for g, _ in ext], [lab for _, lab in ext], "synthetic", verbose=False)
+    assert set(params["features"]) == set(ST.MODEL_FEATURES)
+    assert 5 < params["transition_stats"]["mean_alive_spell_s"] < 30
+    params = json.loads(json.dumps(params))            # exactly what save/load round-trips
+    g, lab = game(9)
+    p, b = g["players"], g["ball"]
     blocks = [(0, len(lab))]
     events = [{"code": "SET PIECES", "type": "kick off (start)", "team": None, "start": 100,
                "end": 225}]
@@ -195,9 +192,11 @@ def test_strict_external_model_trains_and_applies_on_synthetic_data():
     # mirrors the output except where both teams are exactly equally likely -- there Viterbi's
     # fixed tie-break (first state wins) decides, deterministically
     swapped = (1 - slot_team).astype(np.int8)
+    sm = params["shape_model"]
+    state = {"w": np.array(sm["weights"]), "scale": np.array(sm["column_scale"])}
     with ST.use_bins(params["bins"]):
-        f_orig = ST.tracking_features(p, b, slot_team, pitch)
-        f_swap = ST.tracking_features(p, b, swapped, pitch)
+        f_orig = ST.model_features(ST.make_obs(p, b, slot_team, pitch, blocks), state)
+        f_swap = ST.model_features(ST.make_obs(p, b, swapped, pitch, blocks), state)
     for fo, fs in zip(f_orig, f_swap):
         assert np.array_equal(fo.swap[fo.codes], fs.codes), fo.name
     path_sw, _, _ = ST.apply(params, p, b, swapped, events, len(lab), blocks, pitch)
@@ -209,6 +208,32 @@ def test_strict_external_model_trains_and_applies_on_synthetic_data():
     # ... capped at one observation per min_look_frames, however much the codes flicker
     flicker = np.tile([0, 1], 50)
     assert np.isclose(ST.run_weights(flicker, [(0, 100)], min_look_frames=25).sum(), 100 / 25.0)
+
+
+def test_shape_model_is_antisymmetric_and_gaps_hit_their_share():
+    """Swapping home and away negates the team-shape logit exactly, and every gap profile
+    removes the documented share of each block."""
+    from possession import degrade as DG
+    from possession import shape
+    from possession import strict as ST
+    r = np.random.RandomState(4)
+    T, P = 3000, 10
+    st = np.array([0] * 5 + [1] * 5, dtype=np.int8)
+    players = np.clip(np.cumsum(r.normal(0, 0.002, (T, P, 3)), 0) + 0.5, 0, 1).astype(np.float32)
+    ball = players[:, 0].copy()
+    pitch = (105.0, 68.0)
+    o = ST.make_obs(players, ball, st, pitch, [(0, T)])
+    o_sw = ST.make_obs(players, ball, (1 - st).astype(np.int8), pitch, [(0, T)])
+    state = {"w": r.normal(0, 1, 25), "scale": np.ones(25)}
+    z, z_sw = shape.logit(o, state), shape.logit(o_sw, state)
+    ok = np.isfinite(z)
+    assert ok.mean() > 0.9 and np.allclose(z[ok], -z_sw[ok])
+    lab = np.zeros(T, dtype=np.int8)
+    for prof in ("short", "long", "crowded"):
+        g = DG.apply_profile({"name": "x", "players": players, "ball": ball, "labels": lab},
+                             prof, 1)
+        share = np.mean(~np.isfinite(g["ball"][:, 0]))
+        assert abs(share - DG.MISSING_SHARE) < 0.002, (prof, share)
 
 
 def test_viewer_page_round_trips_tracking_and_labels():

@@ -121,9 +121,12 @@ def run_strict(out_path=None, report_path=None, verbose=True, data_dir=None, use
     info.update(stats)
     info["frames_forced_dead"] = int(forced.sum())
     info["external_scale"] = params["scale"]
+    info["checks"] = label_free_checks(labels, ball, model, halves)
     if verbose:
         print("output: {possessions} possessions (mean {mean_possession_s:.1f} s), "
               "{stoppages} stoppages; frames H {H} A {A} D {D}".format(**stats))
+        print("checks (aggregates only, no ground truth): " + ", ".join(
+            "{} {}".format(k, v) for k, v in info["checks"].items()))
     if out_path:
         write_submission(out_path, labels)
         if verbose:
@@ -136,6 +139,39 @@ def run_strict(out_path=None, report_path=None, verbose=True, data_dir=None, use
                   "ball_filled": np.isfinite(ball[:, 0]) & ~seen_before}
         return labels, info, inputs
     return labels, info
+
+
+def label_free_checks(labels, ball, model, halves):
+    """Aggregate figures about the output and the inputs, computed without any ground truth:
+    printed and stored in the report so that a run can be sanity-checked at a glance."""
+    graded = labels != "X"
+    missing = ~np.isfinite(ball[:, 0])
+    live = graded & (labels != "D")
+    dead = graded & (labels == "D")
+    feats = {f.name: f for f in model.features}
+
+    def share(mask, of):
+        return round(float(mask[of].mean()), 3) if of.any() else None
+    out = {
+        "ball_missing_share": share(missing, graded),
+        "ball_missing_when_live": share(missing, live),
+        "ball_missing_when_dead": share(missing, dead),
+        "dead_share": share(labels == "D", graded),
+        "home_share_of_live": share(labels == "H", live),
+    }
+    if "lasttouch" in feats:
+        lt = feats["lasttouch"]
+        out["last_touch_known_share"] = share(~lt.neutral[lt.codes], graded)
+    if "shape" in feats:
+        sh = feats["shape"]
+        out["team_shape_known_share"] = share(~sh.neutral[sh.codes], graded)
+    if "still" in feats:
+        sl = feats["still"]
+        out["still_ball_share"] = share(sl.codes <= 1, graded)
+    for half, s, e in halves:
+        seg = labels[s:e]
+        out["half{}_dead_share".format(half)] = round(float(np.mean(seg == "D")), 3)
+    return out
 
 
 def possession_stats(labels, blocks):

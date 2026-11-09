@@ -1,0 +1,8 @@
+.git
+data
+external
+submission
+**/__pycache__
+.pytest_cache
+*.mp4
+*.pt

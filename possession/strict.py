@@ -33,8 +33,13 @@ from . import config as C
 from . import features as F
 from .hmm import PossessionHMM, H, A, D
 
-PARAMS_VERSION = 2
+PARAMS_VERSION = 3
 TRACKING_FEATURES = ("ball", "pspeed", "bspeed", "bpos", "spread")
+# Added after the benchmark on external matches (scripts/benchmark.py, docs/TECHNICAL_REPORT.md):
+# last touch (possession/touch.py), team shape (possession/shape.py), still ball
+# (possession/deadball.py). Each was kept because it raised the held-out spellF1.
+EXTRA_FEATURES = ("lasttouch", "shape", "still")
+MODEL_FEATURES = TRACKING_FEATURES + EXTRA_FEATURES
 
 
 # ------------------------------------------------------------------------------------------------
@@ -133,6 +138,26 @@ def tracking_features(players, ball, slot_team, pitch, summary=None):
     t = summary if summary is not None else summarise(players, ball, slot_team, pitch)
     return [F.ball_feature_full(t), F.pspeed_feature(t), F.bspeed_feature(t), F.bpos_feature(t),
             F.spread_feature(t)]
+
+
+def make_obs(players, ball, slot_team, pitch, blocks, labels=None, summary=None):
+    """Everything the features read for one match: positions, their summary and graded blocks."""
+    if summary is None:
+        summary = summarise(players, ball, slot_team, pitch)
+    return {"game": {"players": players, "ball": ball, "slot_team": np.asarray(slot_team)},
+            "summary": summary, "blocks": blocks, "labels": labels, "pitch": pitch}
+
+
+def model_features(o, shape_state):
+    """The eight tracking features of the model, in MODEL_FEATURES order, with whatever bin
+    edges are currently set (see use_bins)."""
+    from . import deadball, shape, touch
+    feats = tracking_features(None, None, None, None, summary=o["summary"])
+    feats += touch.lasttouch_feature(o)
+    feats += shape.shape_feature(o, shape_state)
+    feats.append(deadball.still_feature(o["summary"]))
+    assert tuple(f.name for f in feats) == MODEL_FEATURES
+    return feats
 
 
 def tag_features(events, n_frames):
@@ -291,57 +316,46 @@ def tune_scale(per_game_feats, per_game_labels, tables, trans, grid=None):
     return best[0], rows
 
 
-def train(games, labels_list, verbose=True):
-    """Fit tables + transitions, tune the scale; also a leave-one-game-out estimate."""
-    summaries = [summarise(g["players"], g["ball"], g["slot_team"], C.STRICT_EXTERNAL_PITCH)
-                 for g in games]
-    bins = derive_bins(summaries, labels_list)
+def train(games, labels_list, source, verbose=True):
+    """Fit the team-shape model, the emission tables and the transitions on the external games,
+    and tune the evidence scale on them. Held-out evaluation is scripts/benchmark.py."""
+    from . import shape
+    obs = [make_obs(g["players"], g["ball"], g["slot_team"], C.STRICT_EXTERNAL_PITCH,
+                    blocks_from_labels(lab), labels=lab) for g, lab in zip(games, labels_list)]
+    bins = derive_bins([o["summary"] for o in obs], labels_list)
     if verbose:
         print("feature bins from the external games: {}".format(bins))
+    shape_state = shape.fit(obs)
+    if verbose:
+        print("team-shape model: training accuracy {:.3f} on live frames".format(
+            shape_state["train_accuracy"]))
     with use_bins(bins):
-        feats = [tracking_features(None, None, None, None, summary=t) for t in summaries]
+        feats = [model_features(o, shape_state) for o in obs]
     tables = fit_tables(feats, labels_list)
     trans, tstats = fit_transitions(labels_list)
     scale, curve = tune_scale(feats, labels_list, tables, trans)
     if verbose:
-        print("scale search (mean over the 3 external games):")
-        for s, sf, mf in curve:
+        print("scale search (mean over the {} external games):".format(len(games)))
+        for s_, sf, mf in curve:
             print("  scale {:>6.2f}  spellF1 {:.4f}  macroF1 {:.4f}{}".format(
-                s, sf, mf, "   <- chosen" if s == scale else ""))
-    loo = []
-    for i in range(len(games)):
-        tr = [j for j in range(len(games)) if j != i]
-        # Everything, bins included, from the two training games only.
-        t_bins = derive_bins([summaries[j] for j in tr], [labels_list[j] for j in tr])
-        with use_bins(t_bins):
-            t_feats = [tracking_features(None, None, None, None, summary=t) for t in summaries]
-        t_tables = fit_tables([t_feats[j] for j in tr], [labels_list[j] for j in tr])
-        t_trans, _ = fit_transitions([labels_list[j] for j in tr])
-        t_scale, _ = tune_scale([t_feats[j] for j in tr], [labels_list[j] for j in tr],
-                                t_tables, t_trans)
-        sf, mf = spell_f1(labels_list[i], decode_game(t_feats[i], t_tables, t_trans, t_scale,
-                                                      labels_list[i]))
-        loo.append({"held_out": games[i]["name"], "scale": t_scale, "spell_f1": sf,
-                    "macro_f1": mf})
-        if verbose:
-            print("leave-one-out: train on the other two, test on {}: spellF1 {:.4f} macroF1 "
-                  "{:.4f} (scale {:.2f})".format(games[i]["name"], sf, mf, t_scale))
-    names = TRACKING_FEATURES
+                s_, sf, mf, "   <- chosen" if s_ == scale else ""))
     params = {
         "version": PARAMS_VERSION,
-        "source": "Metrica Sports public sample games 1-3 (https://github.com/metrica-sports/"
-                  "sample-data); labels derived mechanically from their event data",
+        "source": source,
+        "training_games": [g["name"] for g in games],
         "bins": bins,
         "bins_rule": {"quantiles": BIN_QUANTILES, "spread_share": SPREAD_SHARE,
                       "setpiece_fractions": SETPIECE_FRACTIONS,
                       "control_radius_m": C.CONTROL_RADIUS_M},
+        "shape_model": {"weights": [round(float(x), 8) for x in shape_state["w"]],
+                        "column_scale": [round(float(x), 8) for x in shape_state["scale"]],
+                        "train_accuracy": round(shape_state["train_accuracy"], 4)},
         "features": {n: {"values": f.values, "table": t.tolist()}
-                     for n, f, t in zip(names, feats[0], tables)},
+                     for n, f, t in zip(MODEL_FEATURES, feats[0], tables)},
         "transitions": trans.tolist(),
         "transition_stats": tstats,
         "scale": scale,
-        "scale_curve": [{"scale": s, "spell_f1": a, "macro_f1": b} for s, a, b in curve],
-        "leave_one_game_out": loo,
+        "scale_curve": [{"scale": s_, "spell_f1": a, "macro_f1": b} for s_, a, b in curve],
     }
     return params
 
@@ -381,8 +395,11 @@ def kickoff_dead_mask(events, n_frames, blocks):
 
 def apply(params, players, ball, slot_team, events, n_frames, blocks, pitch):
     """Labels H/A/D per frame (codes 0/1/2; -1 outside blocks) with the frozen parameters."""
+    sm = params["shape_model"]
+    shape_state = {"w": np.array(sm["weights"]), "scale": np.array(sm["column_scale"])}
+    o = make_obs(players, ball, slot_team, pitch, blocks)
     with use_bins(params["bins"]):
-        tfeats = tracking_features(players, ball, slot_team, pitch)
+        tfeats = model_features(o, shape_state)
     for f in tfeats:
         if f.values != params["features"][f.name]["values"]:
             raise ValueError("feature {} values differ from the trained parameters".format(f.name))

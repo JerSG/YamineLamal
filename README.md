@@ -9,19 +9,24 @@ Team **YamineLamal** submission for **More than a Hack 2027, Phase 1: Ball Posse
 
 For every frame of FC Barcelona vs Athletic Club, the pipeline outputs `H`, `A` or `D` with a
 three-state hidden Markov model decoded by Viterbi. **Every learned or tuned number comes from
-other matches**: Metrica's public sample games, with labels derived from their event data. The
-model is trained there, frozen, and applied unchanged to the competition match. It reads the
+other matches**: Metrica's three public sample games and the seven matches of the DFL open data,
+whose labels are made the way the competition's ground truth is (ball status and possession from
+the tracking). The model is trained there, frozen, and applied unchanged to the competition match. It reads the
 competition match's automatic tracking, Smart Tagging and broadcast recording **as input only**.
 No ground truth, no video and no hand labels of the match are used for anything, and no parameter
 is fitted or tuned on the match. See [`docs/TECHNICAL_REPORT.md`](docs/TECHNICAL_REPORT.md).
 
 ```
-Metrica public sample games ─> train_external.py ─> models/external_params.json  (frozen)
-                                                              │
-tactical tracking ──────────────────────────────┐             ▼
-broadcast tracking ─> align shots ─> fill ball ─┼─> 8 features ─> frozen HMM ─> Viterbi ─> H/A/D
+Metrica sample games + DFL open data ─> train_external.py ─> models/external_params.json  (frozen)
+                                                                       │
+tactical tracking ──────────────────────────────┐                      ▼
+broadcast tracking ─> align shots ─> fill ball ─┼─> 11 features ─> frozen HMM ─> Viterbi ─> H/A/D
 Smart Tagging ──────────────────────────────────┘
 ```
+
+On ten external matches, every change was kept only if it raised the held-out spellF1. On two DFL
+matches held back until the end, the submitted model scores **0.500** against **0.320** for our
+first model ([report, Section 6](docs/TECHNICAL_REPORT.md)).
 
 ## Reproduce the submission
 
@@ -50,9 +55,17 @@ python evaluation/validate_submission.py submission/YamineLamal.csv
 
 `run.py` takes about 1-2 minutes on a 4-core laptop and writes `submission/YamineLamal.csv` and
 `submission/YamineLamal_report.json`, then writes the replay page `submission/viewer.html` and
-opens it in the browser (see below). It is deterministic: the same data and command give a
-byte-identical file. The frozen parameters it uses are committed in
-`models/external_params.json`.
+opens it in the browser (see below). It also prints label-free checks (aggregates only, such as
+the dead-ball share and how often the ball is missing in live and dead output). It is
+deterministic: the same data and command give a byte-identical file. The frozen parameters it
+uses are committed in `models/external_params.json`.
+
+With Docker instead (not needed; the same pinned versions):
+
+```bash
+docker build -t yaminelamal .
+docker run --rm -v "$PWD/data:/app/data:ro" -v "$PWD/submission:/app/submission" yaminelamal
+```
 
 ### Watch the output
 
@@ -72,21 +85,21 @@ tracking, so it is written to `submission/` (gitignored) and is for local use on
 output and is not a labelling tool: nothing seen in it goes back into the model, and no ground
 truth is read.
 
-### Re-training the frozen parameters (optional)
+### Re-training and the benchmark (optional)
 
-The parameters can be regenerated from the public external data, byte for byte:
+The parameters can be regenerated from the public external data:
 
 ```bash
 git clone https://github.com/metrica-sports/sample-data external/metrica-sample-data
+python scripts/download_dfl.py       # DFL open data, ~2.6 GB, into external/dfl
 python scripts/train_external.py     # ~1 minute; rewrites models/external_params.json
+python scripts/benchmark.py          # held-out results on the external matches (~10 minutes)
 ```
 
-It reads no competition data at all. It prints the leave-one-game-out check, training on two
-external games and testing on the third.
+None of them reads competition data.
 
-The submitted file has SHA-256
-`6f0b718333586546f61ded5ddd58e2ca8b30307ba9975e69ec12972cb4c88a72`: running `python run.py` on the
-official data bundle reproduces exactly this file.
+The submitted file's SHA-256 is given in the report (Section 6): running `python run.py` on the official data
+bundle reproduces exactly that file.
 
 ### Options
 
@@ -99,19 +112,31 @@ official data bundle reproduces exactly this file.
 ## How it is trained (external data only)
 
 * **Data:** Metrica Sports' three public sample games (https://github.com/metrica-sports/sample-data),
-  other professional matches with tracking and event data. Labels are derived from the events
-  mechanically (`possession/external.py`).
-* **Learned there, then frozen:** the feature bin edges (equal-share quantiles), the emission
-  tables, the transition probabilities (mean possession 12.5 s, 24% ending in a stoppage, mean
-  stoppage 22.7 s) and the evidence scale (chosen to maximise the organisers' own spellF1 on those
-  games).
+  with labels derived from their event data (`possession/external.py`), and the seven matches of
+  the DFL open data (Bassek et al. 2025, CC BY 4.0), whose labels are the tracking's own ball
+  status and possession, the same definition as the competition's ground truth
+  (`possession/dfl.py`). The DFL ball is almost always tracked, so realistic gaps are added
+  (`possession/degrade.py`).
+* **Features:** who is on or nearest the ball and for how long it has been missing, player and
+  ball speed, ball against the lines, team spread, **the team that last touched the ball**
+  (`possession/touch.py`), **a team-shape model** for frames without a ball (`possession/shape.py`,
+  a home/away-antisymmetric logistic regression), **a still ball at a restart place**
+  (`possession/deadball.py`), and three Smart Tagging features.
+* **Learned there, then frozen:** the feature bin edges (equal-share quantiles), the team-shape
+  model, the emission tables, the transition probabilities and the evidence scale (chosen to
+  maximise the organisers' own spellF1 on those matches).
 * **Fixed rules, no data:** each run of identical feature values is one observation, capped at
   one per second. Smart Tagging tables are fixed priors. Set-piece tags are split into quarters.
   A half is dead before its kickoff tag opens.
-* **Generalisation:** trained on two external games and tested on the unseen third, spellF1 is
-  **0.572 / 0.576 / 0.567** against that game's event-derived labels. Those labels are not the
-  competition's ground truth, so this shows transfer between matches rather than predicting the
-  competition score.
+* **Held-out results** (`scripts/benchmark.py`, mean spellF1; DFL under five tracking-gap
+  profiles × three seeds):
+
+  | model | Metrica | DFL dev | DFL reserved |
+  |---|---|---|---|
+  | first model (Metrica only, five tracking features) | 0.572 | 0.286 | 0.320 |
+  | **submitted** | 0.650 | **0.458** | **0.500** |
+
+  These show transfer between matches; they do not predict the competition score.
 
 ## Repository layout
 
@@ -125,11 +150,18 @@ possession/
   strict.py                   the submitted model: train on external games, apply frozen
   external.py                 readers + event-derived labels for the public sample games
   broadcast.py                broadcast-to-tactical alignment and ball fill
-  extensions.py               candidate extra features, tested and not adopted (see report)
+  touch.py                    touches from ball-velocity changes; the last-touch feature
+  shape.py                    team-shape model (antisymmetric logistic regression)
+  deadball.py                 still ball at a restart place (and "gap context", not adopted)
+  dfl.py                      DFL open data reader; labels from the tracking
+  degrade.py                  tracking-gap profiles for the external benchmark
+  extensions.py               earlier candidate features, tested and not adopted (see report)
   pipeline.py                 data in, possession file out
   viewer.py                   self-contained HTML replay of tracking + labels
 models/external_params.json   the frozen parameters (trained on external data)
-scripts/train_external.py     regenerates models/external_params.json from the public sample games
+scripts/train_external.py     regenerates models/external_params.json from the external data
+scripts/download_dfl.py       downloads the DFL open data (CC BY 4.0)
+scripts/benchmark.py          held-out benchmark on the external matches
 scripts/test_extensions.py    leave-one-game-out test of candidate extra features (external data)
 scripts/view_match.py         writes and opens the replay page (local only)
 scripts/make_banner.py        draws docs/assets/pitch.svg, the simulated README banner
@@ -137,13 +169,16 @@ tests/                        synthetic-data tests, no match data needed: python
 evaluation/                   the organisers' validator and scorer, unchanged (MIT)
 games.py                      the organisers' per-match constants, unchanged (MIT)
 docs/TECHNICAL_REPORT.md      the technical document (rendered: docs/YamineLamal.pdf)
+Dockerfile                    the pinned environment, as an alternative to pip
+.github/workflows/tests.yml   runs the tests on every push
 data/, external/, submission/ match data, external data, generated output: all gitignored
 ```
 
 ## Rules compliance, in short
 
 * **Training and tuning on external data only.** Every learned or tuned number in the submitted
-  model comes from Metrica's public sample games. Nothing is fitted to the competition match.
+  model comes from Metrica's public sample games and the DFL open data. Nothing is fitted to the
+  competition match.
 * **The competition data is used as input only:** tracking, Smart Tagging and broadcast tracking.
   The videos are not used.
 * **No ground truth.** No parameter was fitted, calibrated or chosen on the public ground truth,
@@ -154,5 +189,9 @@ data/, external/, submission/ match data, external data, generated output: all g
 ## Licence
 
 `evaluation/` and `games.py` are the organisers' files, unchanged, under their MIT licence
-(`LICENSE-organisers`). The rest of the code is the team's own. Neither the match data nor
-Metrica's sample data is covered by the organisers' licence; the sample data is acknowledged above.
+(`LICENSE-organisers`). The rest of the code is the team's own. Neither the match data nor the
+external data is covered by the organisers' licence. Metrica's sample data is acknowledged above.
+The DFL open data is © Deutsche Fußball Liga, CC BY 4.0
+(https://doi.org/10.6084/m9.figshare.28196177), described in Bassek, M., Rein, R., Weber, H.,
+Memmert, D. (2025), *An integrated dataset of spatiotemporal and event data in elite soccer*,
+Scientific Data 12, 195, doi:10.1038/s41597-025-04505-y. Neither dataset is redistributed here.
