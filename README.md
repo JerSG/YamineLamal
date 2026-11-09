@@ -20,12 +20,12 @@ is fitted or tuned on the match. See [`docs/TECHNICAL_REPORT.md`](docs/TECHNICAL
 Metrica sample games + DFL open data ─> train_external.py ─> models/external_params.json  (frozen)
                                                                        │
 tactical tracking ──────────────────────────────┐                      ▼
-broadcast tracking ─> align shots ─> fill ball ─┼─> 11 features ─> frozen HMM ─> Viterbi ─> H/A/D
+broadcast tracking ─> align shots ─> fill ball ─┼─> 12 features ─> frozen HMM ─> Viterbi ─> H/A/D
 Smart Tagging ──────────────────────────────────┘
 ```
 
 On ten external matches, every change was kept only if it raised the held-out spellF1. On two DFL
-matches held back until the end, the submitted model scores **0.500** against **0.320** for our
+matches held back until the end, the submitted model scores **0.501** against **0.320** for our
 first model ([report, Section 6](docs/TECHNICAL_REPORT.md)).
 
 ## Reproduce the submission
@@ -121,7 +121,7 @@ bundle reproduces exactly that file.
   ball speed, ball against the lines, team spread, **the team that last touched the ball**
   (`possession/touch.py`), **a team-shape model** for frames without a ball (`possession/shape.py`,
   a home/away-antisymmetric logistic regression), **a still ball at a restart place**
-  (`possession/deadball.py`), and three Smart Tagging features.
+  and **the kick that restarts play** (`possession/deadball.py`), and three Smart Tagging features.
 * **Learned there, then frozen:** the feature bin edges (equal-share quantiles), the team-shape
   model, the emission tables, the transition probabilities and the evidence scale (chosen to
   maximise the organisers' own spellF1 on those matches).
@@ -134,7 +134,7 @@ bundle reproduces exactly that file.
   | model | Metrica | DFL dev | DFL reserved |
   |---|---|---|---|
   | first model (Metrica only, five tracking features) | 0.572 | 0.286 | 0.320 |
-  | **submitted** | 0.650 | **0.458** | **0.500** |
+  | **submitted** | 0.650 | **0.460** | **0.501** |
 
   These show transfer between matches; they do not predict the competition score.
 
@@ -152,7 +152,7 @@ possession/
   broadcast.py                broadcast-to-tactical alignment and ball fill
   touch.py                    touches from ball-velocity changes; the last-touch feature
   shape.py                    team-shape model (antisymmetric logistic regression)
-  deadball.py                 still ball at a restart place (and "gap context", not adopted)
+  deadball.py                 still ball and restart kick (and "gap context", not adopted)
   dfl.py                      DFL open data reader; labels from the tracking
   degrade.py                  tracking-gap profiles for the external benchmark
   extensions.py               earlier candidate features, tested and not adopted (see report)

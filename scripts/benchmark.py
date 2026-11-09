@@ -55,6 +55,8 @@ CONFIGS = {
     "I F + still": {"train": ("metrica", "dfl"), "extras": ("lasttouch", "shape", "still")},
     "J F + gapctx + still": {"train": ("metrica", "dfl"),
                              "extras": ("lasttouch", "shape", "gapctx", "still")},
+    "K I + restart kick": {"train": ("metrica", "dfl"),
+                           "extras": ("lasttouch", "shape", "still", "restart")},
 }
 
 
@@ -70,6 +72,8 @@ def _extras():
     return {"gapctx": Extra(lambda train: None,
                             lambda o, st: [deadball.gapctx_feature(o["summary"], o["blocks"])]),
             "still": Extra(lambda train: None, lambda o, st: [deadball.still_feature(o["summary"])]),
+            "restart": Extra(lambda train: None,
+                             lambda o, st: [deadball.restart_feature(o["summary"])]),
             "touch": Extra(touch.fit, touch.touch_feature),
             "lasttouch": Extra(touch.fit, touch.lasttouch_feature),
             "shape": Extra(shape.fit, shape.shape_feature)}

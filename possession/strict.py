@@ -37,8 +37,8 @@ PARAMS_VERSION = 3
 TRACKING_FEATURES = ("ball", "pspeed", "bspeed", "bpos", "spread")
 # Added after the benchmark on external matches (scripts/benchmark.py, docs/TECHNICAL_REPORT.md):
 # last touch (possession/touch.py), team shape (possession/shape.py), still ball
-# (possession/deadball.py). Each was kept because it raised the held-out spellF1.
-EXTRA_FEATURES = ("lasttouch", "shape", "still")
+# and restart kick (possession/deadball.py). Each was kept because it raised the held-out spellF1.
+EXTRA_FEATURES = ("lasttouch", "shape", "still", "restart")
 MODEL_FEATURES = TRACKING_FEATURES + EXTRA_FEATURES
 
 
@@ -149,13 +149,14 @@ def make_obs(players, ball, slot_team, pitch, blocks, labels=None, summary=None)
 
 
 def model_features(o, shape_state):
-    """The eight tracking features of the model, in MODEL_FEATURES order, with whatever bin
+    """The nine tracking features of the model, in MODEL_FEATURES order, with whatever bin
     edges are currently set (see use_bins)."""
     from . import deadball, shape, touch
     feats = tracking_features(None, None, None, None, summary=o["summary"])
     feats += touch.lasttouch_feature(o)
     feats += shape.shape_feature(o, shape_state)
     feats.append(deadball.still_feature(o["summary"]))
+    feats.append(deadball.restart_feature(o["summary"]))
     assert tuple(f.name for f in feats) == MODEL_FEATURES
     return feats
 

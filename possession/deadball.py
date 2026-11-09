@@ -1,4 +1,5 @@
-"""Dead-ball features: a still ball at a restart place (used), and gap context (tested, not used).
+"""Dead-ball features: a still ball at a restart place and the restart kick (used), and gap
+context (tested, not used).
 
 Both are fixed geometric rules (pitch markings in metres, no thresholds fitted to any match).
 Their emission tables are learned on the external games like every other tracking feature.
@@ -98,3 +99,45 @@ def features(t, blocks, names=NAMES):
     if "still" in names:
         out.append(still_feature(t))
     return out
+
+
+KICK_SPEED_MS = 5.0         # the ball leaves faster than this when a restart is taken
+KICK_SEARCH_FRAMES = (-12, 25)   # where to look for the kick around the end of a still run
+KICK_MARK_FRAMES = 25       # frames marked after the kick (one second)
+KICK_REACH_M = 2.0
+KICK_MARGIN_M = 0.75
+
+
+def restart_feature(t):
+    """The second after a still ball (still for STILL_MIN_S) is struck: play has restarted, and
+    the team of the player at the ball when it was struck usually has it. Values: kick by home,
+    kick by away, kick with no clear taker, none (ball seen), unknown (no ball: neutral)."""
+    v = t["ball_speed"]
+    seen = t["ball_seen"]
+    n = len(v)
+    with np.errstate(invalid="ignore"):
+        slow = seen & np.isfinite(v) & (v < STILL_SPEED_MS)
+        fast = seen & np.isfinite(v) & (v > KICK_SPEED_MS)
+    still = slow & (run_lengths(slow) >= STILL_MIN_S * C.FPS)
+    ends = np.flatnonzero(still[:-1] & ~still[1:]) + 1          # first frame after a still run
+    dh = np.where(np.isfinite(t["dh"]), t["dh"], np.inf)
+    da = np.where(np.isfinite(t["da"]), t["da"], np.inf)
+    mark = np.full(n, -1, dtype=np.int8)
+    lo_off, hi_off = KICK_SEARCH_FRAMES
+    for e in ends:
+        lo, hi = max(0, e + lo_off), min(n, e + hi_off)
+        k = np.flatnonzero(fast[lo:hi])
+        if not len(k):
+            continue
+        kick = lo + k[0]
+        a, b = max(0, e - 12), min(n, e + 12)
+        mh, ma = dh[a:b].min(), da[a:b].min()
+        team = 0 if (mh < KICK_REACH_M and mh + KICK_MARGIN_M < ma) else \
+            1 if (ma < KICK_REACH_M and ma + KICK_MARGIN_M < mh) else 2
+        mark[kick:min(n, kick + KICK_MARK_FRAMES)] = team
+    values = ["kick_home", "kick_away", "kick_unclear", "none", "unknown"]
+    codes = np.select([mark == 0, mark == 1, mark == 2, seen], [0, 1, 2, 3], 4)
+    init_team = {"kick_home": 0.03, "kick_away": 0.01, "kick_unclear": 0.01, "none": 0.95}
+    init_dead = {"kick_home": 0.005, "kick_away": 0.005, "kick_unclear": 0.005, "none": 0.985}
+    return Feature("restart", values, codes.astype(np.int16), init_team, init_dead,
+                   neutral=("unknown",))

@@ -29,14 +29,14 @@ Main components:
 * **Two-camera fusion.** The broadcast recording is aligned to the tactical timeline
   automatically, shot by shot, by matching player positions. Its ball then fills tactical frames
   where the tracker lost the ball.
-* **Eleven per-frame categorical features**: eight from the tracking (including the team that
-  last touched the ball, a team-shape model for frames without a ball, and a still ball) and
-  three from the Smart Tagging.
+* **Twelve per-frame categorical features**: nine from the tracking (including the team that
+  last touched the ball, a team-shape model for frames without a ball, a still ball and the kick
+  that restarts play) and three from the Smart Tagging.
 * **A cap on evidence:** each feature counts as one observation per run of identical values, and
   never more than one per second, which keeps the frozen model stable on noisier tracking.
 * **A benchmark on external matches** (Section 6): every design choice was kept only if it raised
   the held-out spellF1 under five kinds of simulated tracking gaps, and the final model was then
-  confirmed once on two DFL matches held back from all development. There it scores **0.500**
+  confirmed on two DFL matches held back from all development. There it scores **0.501**
   against **0.320** for our first model (trained on Metrica only, without the three new
   features).
 
@@ -53,7 +53,7 @@ of a transition, so a short burst of contrary evidence cannot split a possession
 strong enough to pay for two transitions.
 
 The rules require training and tuning on external data only. A small, interpretable model with
-few parameters transfers between matches far more safely than a large one: eleven categorical
+few parameters transfers between matches far more safely than a large one: twelve categorical
 features, one 25-weight logistic model, a 3×3 transition matrix and one scale, all estimated on
 ten external matches. The held-out results in Section 6 show the transfer.
 
@@ -118,6 +118,7 @@ event-derived Metrica labels (26-35%).
 | `lasttouch` | home, away (or unknown) | the team that last touched the ball (below) |
 | `shape` | strong home, home, even, away, strong away | a team-shape model's verdict (below) |
 | `still` | still at a restart place, still in open play, moving | a placed ball |
+| `restart` | kick by home, kick by away, kick with no clear taker, none | the second after a still ball is struck |
 | `phase` | none, home, away, both | Smart Tagging phases mapped to "team attacking" (Build Up, Progression, Creating Chances, … name the attacker; Defending tags name the defender) |
 | `setpiece` | taker (home / away / not tagged) × quarter of the tag | set-piece windows |
 | `goal` | time left until the kickoff after a goal | celebration and restart |
@@ -152,6 +153,13 @@ the label 88% of the time, and 75% where the ball is missing.
 1 s, at a restart place (within 2 m of a line, within 2.5 m of the centre spot or a penalty spot,
 or in a goal area) or elsewhere. Players walk on 47.5% of dead frames against 3.7% of live ones;
 a still ball is 6.4% of dead frames against 2.5% of live ones.
+
+**Restart kick** (`possession/deadball.py`). When a still ball (as above) is struck faster than
+5 m/s within a second of the end of its still run, the following second is marked as a kick, by
+the team with a player within 2 m of the ball (and 0.75 m closer than any opponent) when it was
+struck. It dates the end of a stoppage and names the restarting team. On the Metrica games,
+92-100% of marked kick frames are in the kicking team's possession; kicks are rare there (30-60
+per game) because their ball is usually untracked during dead play.
 
 ## 4.3 Model
 
@@ -264,7 +272,7 @@ its strength setting changing between folds (0.10 and 0.20). The +0.017 mean is 
 of a three-game test, and the classifier has no cap on evidence for tracking noisier than its
 training data, so it was not adopted.
 
-On the benchmark of Section 6, three more were rejected: the momentary touch itself (as opposed
+On the benchmark of Section 6, two more were rejected: the momentary touch itself (as opposed
 to the last touch: no gain once `lasttouch` is in), and "gap context" (where the ball was lost and
 where it reappears), which separates dead from live play well (57% of dead frames are "lost at a
 line, back at a restart place" against 6% of live ones) but adds nothing measurable once `still`
@@ -275,7 +283,8 @@ and the existing ball features are in (+0.0005).
 * **Ball alive or dead:** dead where the physical evidence of a stoppage outweighs the cost of
   entering and leaving `D`. That evidence is walking players, a slow or still ball (more so at a
   restart place) or one over a line, the ball lost right after going out, a long ball gap, the
-  early part of a set-piece tag, or a goal celebration.
+  early part of a set-piece tag, or a goal celebration. A still ball being struck marks the
+  restart.
   Before each kickoff tag it is dead by rule.
 * **Loose and contested balls** do not change possession by themselves: the last team to touch
   the ball keeps it, and a contested touch clears the last-touch evidence. A change needs the other
@@ -309,19 +318,24 @@ higher (their labels are made the way the ground truth is), its Metrica mean is 
 | A: first model (Metrica only, five tracking features) | **0.572** | 0.286 | 0.320 |
 | B: A trained on Metrica + DFL | 0.556 | 0.328 | 0.371 |
 | F: B + last touch + team shape | 0.668 | 0.442 | 0.483 |
-| **I: F + still ball (submitted)** | 0.650 | **0.458** | **0.500** |
+| I: F + still ball | 0.650 | 0.458 | 0.500 |
+| **K: I + restart kick (submitted)** | 0.650 | **0.460** | **0.501** |
 
-Mean spellF1; DFL figures are means over matches, profiles and seeds. Each step raised the DFL
-mean on every development match. The submitted model is better than A on all five DFL
-development matches (0.433-0.474 against 0.236-0.313), under every profile (markov 0.514, short
-0.454, long 0.464, crowded 0.435, smooth 0.423, against 0.337 / 0.284 / 0.254 / 0.226 / 0.326),
-and on both reserved matches (0.514 and 0.487 against 0.328 and 0.311; macroF1 0.818 and 0.829
-against 0.696 and 0.721). On Metrica it is 0.633 / 0.643 / 0.673 against 0.572 / 0.576 / 0.567.
+Mean spellF1; DFL figures are means over matches, profiles and seeds. Steps B, F and I each raised
+the DFL mean on every development match; the restart kick (K) is a small gain (+0.003, better
+under all five profiles and on four of five matches, Metrica unchanged). The submitted model is
+better than A on all five DFL development matches (0.441-0.474 against 0.236-0.313), under every
+profile (markov 0.515, short 0.455, long 0.466, crowded 0.440, smooth 0.425, against 0.337 /
+0.284 / 0.254 / 0.226 / 0.326), and on both reserved matches (0.514 and 0.487 against 0.328 and
+0.311; macroF1 0.818 and 0.829 against 0.696 and 0.721). On Metrica it is 0.634 / 0.642 / 0.673
+against 0.572 / 0.576 / 0.567.
 
 **Before the reserved matches were set aside,** two earlier explorations had already scored all
 seven DFL matches: training on Metrica + DFL (better on 7 of 7) and the "gap context" feature (no
 gain). The reserved matches were therefore not untouched by every decision, but none of the
-features of models F and I had been run on them before the final check.
+features of models F and I had been run on them before the final check. They were used a second
+time, for the restart kick, after it had passed on the development matches; there it was a tie
+(+0.0003), which the rule accepts as "not reversed".
 
 **Scale curve with all ten matches** (mean spellF1): 0.41 at scale 2, 0.55 at 4, 0.567 at 6,
 **0.570 at 8**, 0.561 at 10, 0.523 at 16. It is flat around the optimum, so a moderately wrong
@@ -354,7 +368,7 @@ the same platform.
   ball-missing share (DATA.md) used to simulate gaps in the external benchmark.
 * **Fixed rules and priors** (not tuned on any data): the Smart Tagging prior tables, the quantile
   levels, the one-observation-per-second cap, the set-piece quarters, the 2 m control radius and
-  the broadcast thresholds, the touch and still-ball thresholds and the restart places. Some were
+  the broadcast thresholds, the touch, still-ball and kick thresholds and the restart places. Some were
 written down while working on this project. None was chosen
   by scoring against any competition data.
 

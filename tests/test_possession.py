@@ -236,6 +236,29 @@ def test_shape_model_is_antisymmetric_and_gaps_hit_their_share():
         assert abs(share - DG.MISSING_SHARE) < 0.002, (prof, share)
 
 
+def test_restart_kick_is_dated_and_given_to_the_taker():
+    """A ball still for 2 s next to a home player, then struck at 15 m/s: the second after the
+    kick is 'kick_home'; no ball anywhere means no evidence."""
+    from possession import deadball as DB
+    from possession import strict as ST
+    T = 200
+    players = np.full((T, 2, 3), np.nan, dtype=np.float32)
+    players[:, 0, :2] = (30.0 / 105, 10.0 / 68)          # home player at the ball
+    players[:, 1, :2] = (60.0 / 105, 40.0 / 68)          # away player far away
+    x = np.full(T, 30.5)
+    x[50:] = 30.5 + 15.0 * (np.arange(T - 50) / 25.0)    # still until frame 50, then 15 m/s
+    ball = np.stack([x / 105, np.full(T, 10.0 / 68), np.zeros(T)], 1).astype(np.float32)
+    t = ST.summarise(players, ball, np.array([0, 1], dtype=np.int8), (105.0, 68.0))
+    f = DB.restart_feature(t)
+    marked = np.flatnonzero(f.codes == f.values.index("kick_home"))
+    assert len(marked) == DB.KICK_MARK_FRAMES and 40 <= marked[0] <= 60
+    assert not np.any(f.codes == f.values.index("kick_away"))
+    ball[:] = np.nan
+    f = DB.restart_feature(ST.summarise(players, ball, np.array([0, 1], dtype=np.int8),
+                                        (105.0, 68.0)))
+    assert np.all(f.neutral[f.codes])
+
+
 def test_viewer_page_round_trips_tracking_and_labels():
     """The replay page embeds subsampled, quantised tracking and run-length labels, and nothing
     else is needed to open it."""
