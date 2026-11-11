@@ -4,8 +4,9 @@
 
 <sub>Simulated players, not match data (drawn by <code>scripts/make_banner.py</code>).</sub>
 
-Team **YamineLamal** submission for **More than a Hack 2027, Phase 1: Ball Possession**
-(Metrica Sports · FC Barcelona · Mobile World Capital Barcelona).
+Team **YamineLamal** (Jerrin, Kumaran, Aditya, Sriram, Hariharan) submission for
+**More than a Hack 2027, Phase 1: Ball Possession** (Metrica Sports · FC Barcelona · Mobile World
+Capital Barcelona).
 
 For every frame of FC Barcelona vs Athletic Club, the pipeline outputs `H`, `A` or `D` with a
 three-state hidden Markov model decoded by Viterbi. **Every learned or tuned number comes from
@@ -98,8 +99,9 @@ python scripts/benchmark.py          # held-out results on the external matches 
 
 None of them reads competition data.
 
-The submitted file's SHA-256 is given in the report (Section 6): running `python run.py` on the official data
-bundle reproduces exactly that file.
+`run.py` has no randomness: on the official data bundle it reproduces the submitted file byte for
+byte. To compare two runs, `Get-FileHash submission\YamineLamal.csv` (Windows) or
+`sha256sum submission/YamineLamal.csv` gives the file's SHA-256.
 
 ### Options
 

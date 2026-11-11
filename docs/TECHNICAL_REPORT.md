@@ -1,7 +1,7 @@
 ---
 title: "Ball possession from automatic tracking, trained on other matches"
 subtitle: "More than a Hack 2027, Phase 1: technical document"
-author: "YamineLamal"
+author: "Team YamineLamal: Jerrin, Kumaran, Aditya, Sriram, Hariharan"
 date: "November 2026"
 ---
 
