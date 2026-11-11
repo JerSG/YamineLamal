@@ -94,6 +94,13 @@ BC_MAX_BALL_ERR_M = 2.0
 # -------------------------------------------------------------------------------------------------
 STRICT_EXTERNAL_PITCH = (105.0, 68.0)   # [data] Metrica sample games' pitch (their README)
 STRICT_SPEED_SMOOTH_FRAMES = 5          # [model] +/- 0.2 s smoothing of position-derived speed
+# [model] Speeds are measured over a chord of +/- SPEED_CHORD_FRAMES (0 = frame to frame).
+# Over a chord, random position jitter cancels out instead of adding up as fake speed: with
+# 10 cm of noise, frame-to-frame speeds read ~4.6 m/s for standing players. A speed above the
+# physical maximum is a track jumping to another object and is dropped.
+SPEED_CHORD_FRAMES = 6
+MAX_PLAYER_SPEED_MS = 12.0   # [football] faster than any sprinter
+MAX_BALL_SPEED_MS = 45.0     # [football] faster than any shot
 # [model] evidence scales tried on the external games; the best mean spellF1 there is kept
 STRICT_SCALE_GRID = (2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 12.0, 14.0, 16.0)
 # [model] Most observations a feature may contribute: one per second (25 frames), however much

@@ -34,11 +34,13 @@ Main components:
   that restarts play) and three from the Smart Tagging.
 * **A cap on evidence:** each feature counts as one observation per run of identical values, and
   never more than one per second, which keeps the frozen model stable on noisier tracking.
+* **Speeds robust to tracking noise:** player and ball speeds are measured over half a second,
+  so position jitter cannot pass for movement.
 * **A benchmark on external matches** (Section 6): every design choice was kept only if it raised
-  the held-out spellF1 under five kinds of simulated tracking gaps, and the final model was then
-  confirmed on two DFL matches held back from all development. There it scores **0.501**
-  against **0.320** for our first model (trained on Metrica only, without the three new
-  features).
+  the held-out spellF1 under six kinds of simulated tracking problems (ball gaps of several kinds,
+  a smoothed ball, fragmented anonymous tracks with position noise), and the final model was then
+  confirmed on two DFL matches held back from all development. There it scores **0.495**
+  against **0.312** for our first model (trained on Metrica only, five tracking features).
 
 There is no competition score to report: the ground truth is private, and we did not evaluate the
 submitted model against the public 5-minute window (Section 7).
@@ -233,7 +235,8 @@ follows.
 | **ball missing** | where an aligned broadcast frame has the ball, it fills the gap (4.6: 4,763 frames); an observed tactical ball is never overridden. Otherwise the `ball` feature records how long the ball has been missing, in four bins learned on the external games (19 / 32 / 54 s), so a long gap is evidence of a stoppage while a short one is not. The training data has comparable missingness: the Metrica games track the ball on 59-68% of graded frames, and the DFL matches get gaps simulated from the Metrica tracking |
 | **possession while the ball is missing** | the `lasttouch` feature carries the team that last played the ball through short gaps, and the team-shape model gives evidence on frames without a ball (75% agreement there on the training data); a change of state also costs a transition, so without contrary evidence the last team keeps possession |
 | **players missing** | features are built from whoever is tracked. A quantity that cannot be measured reliably becomes a **neutral** value, with a likelihood ratio of 1, never a guess: mean speed when fewer than 8 players are tracked, team spread when a team has fewer than 5, ball speed, ball position and still ball when the ball is missing (except "lost right after going out", which is evidence), team shape when a team has fewer than 5 players tracked, last touch after a second without a ball |
-| **identity switches** | no feature follows an individual player. They use which **team** is nearest the ball and team-level aggregates (the team-shape model included), so a track slot changing player does not matter. The one per-slot quantity, speed from consecutive positions, is smoothed over ±0.2 s per player, averaged over all tracked players and smoothed again over ±0.5 s, which limits a jump in one slot to a brief, diluted blip |
+| **position noise** | speeds are measured over a chord of ±6 frames (0.48 s) rather than frame to frame, so random jitter cancels out instead of adding up: with 10 cm of noise, frame-to-frame speeds read about 4.6 m/s for standing players, which erased the "players walk during stoppages" evidence in our tests. The benchmark's `full` profile adds this noise (Section 6) |
+| **identity switches** | no feature follows an individual player. They use which **team** is nearest the ball and team-level aggregates (the team-shape model included), so a track slot changing player does not matter. The one per-slot quantity, speed from consecutive positions, is smoothed over ±0.2 s per player, averaged over all tracked players and smoothed again over ±0.5 s, which limits a jump in one slot to a brief, diluted blip; a speed above 12 m/s (faster than any player) is a track jumping to another object and is dropped. In the benchmark, cutting every track into anonymous fragments over 46 slots changed no score |
 | **duplicated objects** (more than 22 tracked) | nearest-player distances are unaffected; aggregates change marginally |
 | **smoothed ball** | the competition's automatic ball track is smoothed over about a second, which blurs touches. Touches are measured over 0.48 s chords, and the benchmark includes a profile with the ball smoothed over 1 s (Section 6), where the model keeps its advantage |
 | **noise and flicker** | each feature counts as one observation per run of identical values, capped at **one per second** (4.3), and Viterbi requires enough evidence to pay for two transitions before it splits a possession. This strongly limits how far jittery tracking can fragment possessions; without the cap, the model's quality collapsed just above its best scale (4.3), and with it the curve is smooth (Section 6) |
@@ -308,10 +311,15 @@ higher (their labels are made the way the ground truth is), its Metrica mean is 
   are scored with their own tracking gaps. DFL matches are scored under five gap profiles
   (`possession/degrade.py`), each with three seeds: `markov` (gaps as on the Metrica tracking),
   `short` (mean 0.5 s), `long` (4 s), `crowded` (2 s, starting where players crowd the ball),
-  each removing 41% of the ball as DATA.md reports, and `smooth` (markov gaps, ball smoothed
-  over 1 s, as the competition's ball is).
+  each removing 41% of the ball as DATA.md reports, `smooth` (markov gaps, ball smoothed
+  over 1 s, as the competition's ball is), and `full` (crowded gaps, every player track cut into
+  fragments of mean 60 s in 23 anonymous slots per team as in the competition's 46, and Gaussian
+  position noise of 10 cm for players and 20 cm for the ball). `full` was added last; the table
+  below of the development steps was run before it existed.
 * **Final check:** two DFL matches (J03WQQ and J03WR9, the last two by id) were held back from all
   development and scored once, with the model trained on every development match.
+
+Development steps (five profiles, before `full` was added):
 
 | model | Metrica dev | DFL dev | DFL reserved |
 |---|---|---|---|
@@ -319,26 +327,46 @@ higher (their labels are made the way the ground truth is), its Metrica mean is 
 | B: A trained on Metrica + DFL | 0.556 | 0.328 | 0.371 |
 | F: B + last touch + team shape | 0.668 | 0.442 | 0.483 |
 | I: F + still ball | 0.650 | 0.458 | 0.500 |
-| **K: I + restart kick (submitted)** | 0.650 | **0.460** | **0.501** |
+| K: I + restart kick | 0.650 | 0.460 | 0.501 |
+
+The `full` profile then showed one weakness of K: position noise made every player look fast
+(4.6 m/s median for standing players), and spellF1 under `full` fell to 0.346 against 0.44-0.52
+under the other profiles. Measuring speeds over a chord (4.7) fixed it. Chords of ±3 and ±6
+frames were compared, and ±6 had the higher DFL mean. With all six profiles:
+
+| model | Metrica dev | DFL dev | DFL dev macroF1 | DFL reserved |
+|---|---|---|---|---|
+| A: first model | 0.572 | 0.278 | 0.674 | 0.312 |
+| K: frame-to-frame speeds | 0.650 | 0.441 | 0.772 | 0.482 |
+| **L: K with speeds over ±6 frames (submitted)** | **0.658** | **0.455** | **0.804** | **0.495** |
+
+Under `full`, L scores 0.455 against 0.346 for K; under the other profiles it is within 0.011 of
+K (lower by 0.001-0.010). It is higher than K on all five DFL development matches, on all three
+Metrica games and on both reserved matches (0.503 and 0.487 against 0.495 and 0.469).
+
+**A second held-out split.** Retraining on Metrica and the other five DFL matches and holding out
+J03WN1 and J03WR9 instead gives the same picture: L scores 0.432 and 0.491 (all six profiles),
+against 0.418 and 0.474 for K, and 0.436 and 0.492 under `full`.
 
 Mean spellF1; DFL figures are means over matches, profiles and seeds. Steps B, F and I each raised
 the DFL mean on every development match; the restart kick (K) is a small gain (+0.003, better
-under all five profiles and on four of five matches, Metrica unchanged). The submitted model is
-better than A on all five DFL development matches (0.441-0.474 against 0.236-0.313), under every
-profile (markov 0.515, short 0.455, long 0.466, crowded 0.440, smooth 0.425, against 0.337 /
-0.284 / 0.254 / 0.226 / 0.326), and on both reserved matches (0.514 and 0.487 against 0.328 and
-0.311; macroF1 0.818 and 0.829 against 0.696 and 0.721). On Metrica it is 0.634 / 0.642 / 0.673
-against 0.572 / 0.576 / 0.567.
+under all five profiles and on four of five matches, Metrica unchanged). The submitted model (L)
+is better than A on all five DFL development matches (0.430-0.472 against 0.232-0.303), under
+every profile (markov 0.514, short 0.445, long 0.460, crowded 0.433, smooth 0.421, full 0.455,
+against 0.337 / 0.284 / 0.254 / 0.226 / 0.326 / 0.241), and on both reserved matches (0.503 and
+0.487 against 0.320 and 0.304; macroF1 0.802 and 0.824 against 0.666 and 0.704). On Metrica it is
+0.647 / 0.643 / 0.684 against 0.572 / 0.576 / 0.567.
 
 **Before the reserved matches were set aside,** two earlier explorations had already scored all
 seven DFL matches: training on Metrica + DFL (better on 7 of 7) and the "gap context" feature (no
 gain). The reserved matches were therefore not untouched by every decision, but none of the
-features of models F and I had been run on them before the final check. They were used a second
-time, for the restart kick, after it had passed on the development matches; there it was a tie
-(+0.0003), which the rule accepts as "not reversed".
+features of models F and I had been run on them before the final check. They were used again,
+for the restart kick (a tie, +0.0003, which the rule accepts as "not reversed") and for the speed
+chord (+0.008 and +0.018), each time after the change had passed on the development matches.
+Repeated looks weaken them as an untouched test; the second split above is a further check.
 
-**Scale curve with all ten matches** (mean spellF1): 0.41 at scale 2, 0.55 at 4, 0.567 at 6,
-**0.570 at 8**, 0.561 at 10, 0.523 at 16. It is flat around the optimum, so a moderately wrong
+**Scale curve with all ten matches** (mean spellF1): 0.40 at scale 2, 0.55 at 4, 0.564 at 6,
+**0.569 at 8**, 0.561 at 10, 0.524 at 16. It is flat around the optimum, so a moderately wrong
 scale costs little.
 
 These scores show transfer between matches; they do not predict the competition score, which
@@ -368,7 +396,8 @@ the same platform.
   ball-missing share (DATA.md) used to simulate gaps in the external benchmark.
 * **Fixed rules and priors** (not tuned on any data): the Smart Tagging prior tables, the quantile
   levels, the one-observation-per-second cap, the set-piece quarters, the 2 m control radius and
-  the broadcast thresholds, the touch, still-ball and kick thresholds and the restart places. Some were
+  the broadcast thresholds, the touch, still-ball and kick thresholds, the restart places and the
+maximum player and ball speeds. The speed chord (±6 frames) was chosen on the external benchmark. Some were
 written down while working on this project. None was chosen
   by scoring against any competition data.
 

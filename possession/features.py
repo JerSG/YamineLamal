@@ -256,9 +256,17 @@ def tracking_summary(players, ball, slot_team, pitch):
 
     # Ball speed from positions, only between two consecutive tracked frames.
     v = np.full(len(bx), np.nan)
-    step = np.hypot(np.diff(bx), np.diff(by)) * C.FPS
-    both = ball_seen[1:] & ball_seen[:-1]
-    v[1:] = np.where(both, step, np.nan)
+    k = C.SPEED_CHORD_FRAMES
+    if k and len(bx) > 2 * k:      # over a chord (see config.SPEED_CHORD_FRAMES)
+        both = ball_seen[2 * k:] & ball_seen[:-2 * k]
+        step = np.hypot(bx[2 * k:] - bx[:-2 * k], by[2 * k:] - by[:-2 * k]) * C.FPS / (2 * k)
+        v[k:-k] = np.where(both, step, np.nan)
+        with np.errstate(invalid="ignore"):
+            v[v > C.MAX_BALL_SPEED_MS] = np.nan
+    elif not k:
+        step = np.hypot(np.diff(bx), np.diff(by)) * C.FPS
+        both = ball_seen[1:] & ball_seen[:-1]
+        v[1:] = np.where(both, step, np.nan)
     ball_speed = centred_mean(v, C.BALL_SPEED_SMOOTH_FRAMES)
     ball_speed[~ball_seen] = np.nan
 

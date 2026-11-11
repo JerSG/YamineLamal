@@ -259,6 +259,30 @@ def test_restart_kick_is_dated_and_given_to_the_taker():
     assert np.all(f.neutral[f.codes])
 
 
+def test_speeds_over_a_chord_ignore_position_noise():
+    """Standing players with 10 cm of jitter: frame-to-frame speeds read several m/s, speeds over
+    the chord stay near zero; a walking player keeps his real speed."""
+    from possession import config as C
+    from possession import strict as ST
+    r = np.random.RandomState(0)
+    T, pitch = 500, (105.0, 68.0)
+    x = np.full((T, 2), 50.0)
+    x[:, 1] += np.arange(T) * 1.5 / 25                    # second player walks at 1.5 m/s
+    pos = np.stack([x / 105 + r.normal(0, 0.10 / 105, (T, 2)),
+                    np.full((T, 2), 0.5) + r.normal(0, 0.10 / 68, (T, 2)),
+                    np.zeros((T, 2))], axis=2).astype(np.float32)
+    saved = C.SPEED_CHORD_FRAMES
+    try:
+        C.SPEED_CHORD_FRAMES = 0
+        frame = np.nanmedian(ST.speed_from_positions(pos, pitch), axis=0)
+        C.SPEED_CHORD_FRAMES = 6
+        chord = np.nanmedian(ST.speed_from_positions(pos, pitch), axis=0)
+    finally:
+        C.SPEED_CHORD_FRAMES = saved
+    assert frame[0] > 3.0 and chord[0] < 0.6
+    assert abs(chord[1] - 1.5) < 0.3
+
+
 def test_viewer_page_round_trips_tracking_and_labels():
     """The replay page embeds subsampled, quantised tracking and run-length labels, and nothing
     else is needed to open it."""

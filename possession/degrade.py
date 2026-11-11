@@ -13,6 +13,10 @@ realistic and harsher conditions, ball positions are removed according to a prof
   smooth    the markov gaps, and the remaining ball positions smoothed over about one second
             (a centred mean of SMOOTH_FRAMES within each tracked stretch), because the
             competition's automatic tracking delivers a smoothed ball
+  full      the crowded gaps, plus what automatic tracking does to players: every player's
+            track is cut into fragments (mean FRAGMENT_MEAN_S) that land in anonymous slots,
+            SLOTS_PER_TEAM per team as in the competition's 46, and Gaussian position noise
+            (PLAYER_NOISE_M for players, BALL_NOISE_M for the ball)
 
 Every profile is deterministic for a (match, profile, seed). Labels are never read by the gap
 placement except by `markov`, whose live/dead rates come from the external games; the others
@@ -28,8 +32,13 @@ from . import config as C
 MISSING_SHARE = 0.41        # organisers' DATA.md: no ball on 41% of graded frames
 MAX_GAP_S = 30.0
 CROWD_RADIUS_M = 5.0
-PROFILES = {"markov": None, "short": 0.5, "long": 4.0, "crowded": 2.0, "smooth": None}
+PROFILES = {"markov": None, "short": 0.5, "long": 4.0, "crowded": 2.0, "smooth": None,
+            "full": 2.0}
 SMOOTH_FRAMES = 25
+SLOTS_PER_TEAM = 23
+FRAGMENT_MEAN_S = 60.0
+PLAYER_NOISE_M = 0.10
+BALL_NOISE_M = 0.20
 
 
 def rng_for(name, profile, seed):
@@ -81,6 +90,40 @@ def smooth_ball(ball, frames=SMOOTH_FRAMES):
     return out
 
 
+def fragment_players(players, slot_team, rng, pitch):
+    """Anonymous fragmented tracks: (T, 2 * SLOTS_PER_TEAM, 3) and the new slot -> team map.
+    Each player's tracked stretches are cut into exponential fragments; each fragment goes to a
+    slot of the player's team that is free for its whole duration."""
+    T = players.shape[0]
+    out = np.full((T, 2 * SLOTS_PER_TEAM, 3), np.nan, dtype=np.float32)
+    new_team = np.array([0] * SLOTS_PER_TEAM + [1] * SLOTS_PER_TEAM, dtype=np.int8)
+    free_from = np.zeros(2 * SLOTS_PER_TEAM, dtype=np.int64)
+    pieces = []
+    for p in range(players.shape[1]):
+        seen = np.isfinite(players[:, p, 0])
+        edges = np.flatnonzero(np.diff(np.concatenate(([0], seen.astype(int), [0]))))
+        for a, b in zip(edges[::2], edges[1::2]):
+            t = a
+            while t < b:
+                n = max(25, int(rng.exponential(FRAGMENT_MEAN_S * C.FPS)))
+                pieces.append((t, min(b, t + n), p))
+                t += n
+    pieces.sort()
+    for a, b, p in pieces:
+        team = int(slot_team[p])
+        slots = np.flatnonzero((new_team == team) & (free_from <= a))
+        if not len(slots):
+            continue                       # more simultaneous fragments than slots: dropped
+        k = int(slots[rng.randint(len(slots))])
+        out[a:b, k] = players[a:b, p]
+        free_from[k] = b
+    length, width = pitch
+    noise = rng.normal(0, 1, out.shape[:2] + (2,)).astype(np.float32)
+    out[..., 0] += noise[..., 0] * PLAYER_NOISE_M / length
+    out[..., 1] += noise[..., 1] * PLAYER_NOISE_M / width
+    return out, new_team
+
+
 def apply_profile(game, profile, seed, markov_model=None, pitch=(105.0, 68.0)):
     """A copy of the game with the ball removed according to the profile."""
     from . import dfl
@@ -99,5 +142,11 @@ def apply_profile(game, profile, seed, markov_model=None, pitch=(105.0, 68.0)):
     g = dict(game)
     ball = game["ball"].copy()
     ball[missing] = np.nan
+    if profile == "full":
+        length, width = pitch
+        ball[:, 0] += rng.normal(0, BALL_NOISE_M / length, len(ball)).astype(np.float32)
+        ball[:, 1] += rng.normal(0, BALL_NOISE_M / width, len(ball)).astype(np.float32)
+        g["players"], g["slot_team"] = fragment_players(game["players"], game["slot_team"],
+                                                         rng, pitch)
     g["ball"] = ball
     return g

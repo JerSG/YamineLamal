@@ -25,7 +25,7 @@ Smart Tagging ──────────────────────
 ```
 
 On ten external matches, every change was kept only if it raised the held-out spellF1. On two DFL
-matches held back until the end, the submitted model scores **0.501** against **0.320** for our
+matches held back until the end, the submitted model scores **0.495** against **0.312** for our
 first model ([report, Section 6](docs/TECHNICAL_REPORT.md)).
 
 ## Reproduce the submission
@@ -128,13 +128,16 @@ bundle reproduces exactly that file.
 * **Fixed rules, no data:** each run of identical feature values is one observation, capped at
   one per second. Smart Tagging tables are fixed priors. Set-piece tags are split into quarters.
   A half is dead before its kickoff tag opens.
-* **Held-out results** (`scripts/benchmark.py`, mean spellF1; DFL under five tracking-gap
-  profiles × three seeds):
+* **Robust to tracking noise:** speeds are measured over half a second, so position jitter
+  cannot pass for movement, and a track jumping to another object is ignored.
+* **Held-out results** (`scripts/benchmark.py`, mean spellF1; DFL under six tracking-problem
+  profiles × three seeds: ball gaps of several kinds, a smoothed ball, and fragmented anonymous
+  tracks with position noise):
 
   | model | Metrica | DFL dev | DFL reserved |
   |---|---|---|---|
-  | first model (Metrica only, five tracking features) | 0.572 | 0.286 | 0.320 |
-  | **submitted** | 0.650 | **0.460** | **0.501** |
+  | first model (Metrica only, five tracking features) | 0.572 | 0.278 | 0.312 |
+  | **submitted** | **0.658** | **0.455** | **0.495** |
 
   These show transfer between matches; they do not predict the competition score.
 

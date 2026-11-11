@@ -53,7 +53,13 @@ def speed_from_positions(players, pitch, half_window=None):
     x = players[..., 0].astype(np.float64) * length
     y = players[..., 1].astype(np.float64) * width
     v = np.full(x.shape, np.nan)
-    v[1:] = np.hypot(np.diff(x, axis=0), np.diff(y, axis=0)) * C.FPS
+    k = C.SPEED_CHORD_FRAMES
+    if k and len(x) > 2 * k:
+        v[k:-k] = np.hypot(x[2 * k:] - x[:-2 * k], y[2 * k:] - y[:-2 * k]) * C.FPS / (2 * k)
+        with np.errstate(invalid="ignore"):
+            v[v > C.MAX_PLAYER_SPEED_MS] = np.nan
+    elif not k:
+        v[1:] = np.hypot(np.diff(x, axis=0), np.diff(y, axis=0)) * C.FPS
     valid = np.isfinite(v)
     cs = np.concatenate([np.zeros((1,) + v.shape[1:]), np.cumsum(np.where(valid, v, 0), 0)])
     cn = np.concatenate([np.zeros((1,) + v.shape[1:]), np.cumsum(valid, 0)])
@@ -353,6 +359,7 @@ def train(games, labels_list, source, verbose=True):
                         "train_accuracy": round(shape_state["train_accuracy"], 4)},
         "features": {n: {"values": f.values, "table": t.tolist()}
                      for n, f, t in zip(MODEL_FEATURES, feats[0], tables)},
+        "speed_chord_frames": C.SPEED_CHORD_FRAMES,
         "transitions": trans.tolist(),
         "transition_stats": tstats,
         "scale": scale,
@@ -398,7 +405,12 @@ def apply(params, players, ball, slot_team, events, n_frames, blocks, pitch):
     """Labels H/A/D per frame (codes 0/1/2; -1 outside blocks) with the frozen parameters."""
     sm = params["shape_model"]
     shape_state = {"w": np.array(sm["weights"]), "scale": np.array(sm["column_scale"])}
-    o = make_obs(players, ball, slot_team, pitch, blocks)
+    saved_chord = C.SPEED_CHORD_FRAMES
+    C.SPEED_CHORD_FRAMES = params.get("speed_chord_frames", 0)
+    try:
+        o = make_obs(players, ball, slot_team, pitch, blocks)
+    finally:
+        C.SPEED_CHORD_FRAMES = saved_chord
     with use_bins(params["bins"]):
         tfeats = model_features(o, shape_state)
     for f in tfeats:

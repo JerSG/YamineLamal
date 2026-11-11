@@ -94,7 +94,7 @@ def obs_entry(game, labels):
             "blocks": ST.blocks_from_labels(labels)}
 
 
-def prepare(cache_dir, final):
+def prepare(cache_dir, final, reserved_names=RESERVED):
     met = E.load_all(os.path.join(ROOT, "external", "metrica-sample-data", "data"))
     mlab = [E.labels(g) for g in met]
     markov = dfl.missing_mask_model(met, mlab)
@@ -104,7 +104,7 @@ def prepare(cache_dir, final):
                       "train": obs_entry(g, lab), "test": {("own", 0): None}})
         games[-1]["test"][("own", 0)] = games[-1]["train"]
     for g in load_dfl(cache_dir):
-        reserved = g["name"] in RESERVED
+        reserved = g["name"] in reserved_names
         entry = {"name": g["name"], "set": "dfl", "reserved": reserved,
                  "train": obs_entry(DG.apply_profile(g, TRAIN_PROFILE, TRAIN_SEED, markov), g["labels"]),
                  "test": {}}
@@ -195,11 +195,17 @@ def main():
     ap.add_argument("--cache", default=os.path.join(ROOT, "external", "cache"),
                     help="where parsed DFL matches are cached (gitignored)")
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--speed-chord", type=int, default=None,
+                    help="override config.SPEED_CHORD_FRAMES for every configuration")
+    ap.add_argument("--reserved", nargs="*", default=list(RESERVED),
+                    help="DFL matches held back (default: the two fixed in RESERVED)")
     ap.add_argument("--out", default=None, help="write every score to this JSON file")
     a = ap.parse_args()
+    if a.speed_chord is not None:
+        C.SPEED_CHORD_FRAMES = a.speed_chord
     os.makedirs(a.cache, exist_ok=True)
     t0 = time.time()
-    G = prepare(a.cache, a.final)
+    G = prepare(a.cache, a.final, tuple(a.reserved))
     print("prepared {} games in {:.0f} s".format(len(G), time.time() - t0))
     jobs = [(c, i) for c in a.configs for i, g in enumerate(G)
             if g["test"] and (g["reserved"] == a.final)]
