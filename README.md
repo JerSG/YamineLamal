@@ -61,6 +61,16 @@ the dead-ball share and how often the ball is missing in live and dead output). 
 deterministic: the same data and command give a byte-identical file. The frozen parameters it
 uses are committed in `models/external_params.json`.
 
+**Why it takes about a minute.** The model itself is fast: reading the tactical tracking,
+computing the features and decoding the whole match take about 10 seconds. Almost all of the rest
+is the broadcast fusion (report, Section 4.6). The broadcast recording comes with no mapping to
+the tactical timeline, so each of its 160 camera shots is matched against every possible moment
+of the match by comparing player positions, and accepted only after an independent check on the
+ball. That exhaustive search is what makes the alignment reliable (110 shots accepted, ball
+agreement 0.76 m median), and it runs in parallel on all CPU cores. It fills 4,763 frames where
+the tactical tracker lost the ball. `python run.py --no-broadcast` skips it and runs in about
+10 seconds, but gives a different file: the submitted file is the one with broadcast fusion.
+
 With Docker instead (not needed; the same pinned versions):
 
 ```bash

@@ -224,6 +224,14 @@ second), and the exceptions are replays, each matched to the moment it shows. Wh
 ball is missing, an aligned broadcast ball fills it (**4,763** frames). An observed tactical ball
 is never overridden. Every threshold was fixed before the first alignment ran.
 
+**Runtime.** The alignment is the slow part of the pipeline: about a minute on a 4- to 8-core
+laptop, against about 10 seconds for everything else (reading the tactical tracking, the features
+and the decoding). Each shot's offset is searched over every frame of the match rather than near
+a guess, because a shot can show any moment (replays included) and a faster screening step we
+tried overstated the margin between the best and second-best offsets, which the acceptance test
+relies on. The search runs in parallel on all cores. `--no-broadcast` skips the fusion and runs
+in about 10 seconds, but produces a different file; the submitted file uses the fusion.
+
 ## 4.7 Handling missing and noisy tracking
 
 The competition tracking is automatic and uncorrected: it has gaps, fragmented tracks and identity
@@ -442,7 +450,7 @@ source.
 # Python 3.12+ (the pinned numpy 2.5.3 requires it); verified on 3.13
 pip install -r requirements.txt
 # unpack the match data into data/ (see data/README.md)
-python run.py                                  # ~1-2 minutes; deterministic
+python run.py                                  # ~1 minute (most of it the broadcast alignment); deterministic
 python evaluation/validate_submission.py submission/YamineLamal.csv
 python -m pytest -q tests                      # synthetic-data tests, no match data needed
 # optional: the same in a pinned container (Dockerfile)
