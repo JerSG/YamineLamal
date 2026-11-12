@@ -30,11 +30,28 @@ import games  # noqa: E402
 
 
 
+def data_paths(data_dir=None, source=games.DEFAULT_SOURCE):
+    """games.asset_paths, plus one convenience: a file missing from data/<source>/ is also looked
+    for directly in data/ (the six files put in one folder, with their original names). The
+    subfolder layout of the bundle takes priority; the files and their contents are the same
+    either way, so the output does not depend on the layout."""
+    paths = games.asset_paths(data_dir=data_dir, source=source)
+    root = data_dir or games.DATA_DIR
+    out = {}
+    for name, path in paths.items():
+        if not os.path.isfile(path):
+            flat = os.path.join(root, os.path.basename(path))
+            if os.path.isfile(flat):
+                path = flat
+        out[name] = path
+    return out
+
+
 def broadcast_hook(data_dir=None, verbose=True):
     """A ball_hook that fills tactical ball gaps from the aligned broadcast, or None if the
     broadcast files are not all present."""
     from . import broadcast as B
-    bpaths = games.asset_paths(data_dir=data_dir, source="broadcast")
+    bpaths = data_paths(data_dir=data_dir, source="broadcast")
     need = ("atd_meta", "atd_raw", "homography")
     if not all(S.file_exists(bpaths[k]) for k in need):
         return None
@@ -89,7 +106,7 @@ def run_strict(out_path=None, report_path=None, verbose=True, data_dir=None, use
     players, ball (after broadcast fill), ball_filled and meta. The labels do not depend on it."""
     from . import strict as ST
     params = ST.load(params_path or STRICT_PARAMS)
-    paths = games.asset_paths(data_dir=data_dir)
+    paths = data_paths(data_dir=data_dir)
     n_frames = games.source_frames("tactical")
     for k in ("atd_meta", "atd_raw", "smart_tagging"):
         if not S.file_exists(paths[k]):

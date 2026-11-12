@@ -13,6 +13,9 @@ data/broadcast/BAR-ATH_broadcast_atd.txt            used (broadcast fusion)
 data/broadcast/BAR-ATH_broadcast_homography.csv     used (broadcast fusion)
 ```
 
+Putting the six files directly in `data/` (no `tactical/` or `broadcast/` subfolders, original
+names kept) also works: a file not found in its subfolder is looked for in `data/` itself.
+
 The submitted file is produced from these six. The tactical homography and the videos are not used. Without the three broadcast files the pipeline still runs, tactical-only (or pass
 `--no-broadcast`). To keep the data elsewhere, set
 `MTAH_DATA_DIR=/path/to/bundle` (a folder that contains `tactical/`).

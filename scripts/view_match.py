@@ -44,7 +44,8 @@ def competition(a):
     csv = os.path.join(ROOT, "submission", "{}.csv".format(a.team))
     if not os.path.exists(csv):
         sys.exit("{} not found: run  python run.py  first".format(os.path.relpath(csv, ROOT)))
-    paths = games.asset_paths()
+    from possession.pipeline import data_paths
+    paths = data_paths()
     n_frames = games.source_frames("tactical")
     meta = S.read_atd_meta(paths["atd_meta"])
     print("reading tracking ...")
