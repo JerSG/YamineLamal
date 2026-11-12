@@ -308,6 +308,18 @@ def test_dead_from_the_goal_until_its_kickoff():
     ev2 = [dict(ev[0], start=1150)] + ev[1:]
     forced = ST.goal_dead_mask(ev2, 8000, [(0, 8000)], ball, pitch)
     assert forced[1100:2500].all() and not forced[:1100].any()
+    # a goal tag that opens AFTER its kickoff: paired by order; the goal is the last time the
+    # ball was lost in the box before that kickoff
+    ball[:] = np.nan
+    ball[1500:1700, 0], ball[1500:1700, 1] = 100.0 / 105, 0.5     # lost in the box at 1700
+    ev3 = [{"code": "GOALS", "type": "", "team": 0, "start": 2700, "end": 2900},
+           {"code": "SET PIECES", "type": "kick off (after goal)", "team": 1, "start": 2500,
+            "end": 2600}]
+    forced = ST.goal_dead_mask(ev3, 8000, [(0, 8000)], ball, pitch)
+    assert forced[1700:2500].all() and not forced[:1700].any() and not forced[2500:].any()
+    # ... and with no ball event before that kickoff, nothing is forced
+    ball[:] = np.nan
+    assert not ST.goal_dead_mask(ev3, 8000, [(0, 8000)], ball, pitch).any()
     # a kickoff more than 3 minutes after the tag: nothing forced
     late = [dict(ev[1], start=1000 + int(ST.GOAL_KICKOFF_MAX_S * 25) + 1)]
     assert not ST.goal_dead_mask(ev[:1] + late, 20000, [(0, 20000)]).any()

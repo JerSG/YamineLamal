@@ -416,14 +416,28 @@ def _kickoffs_after_goal(events):
                            and e["type"].startswith("kick off (after goal)")))
 
 
+GOAL_PAIR_MAX_S = 360.0      # second pass: a goal tag and an unused after-goal kickoff, either order
+
+
 def goal_moments(events, ball, pitch, n_frames):
-    """For each GOALS tag with a "Kick Off (After Goal)" tag opening within GOAL_KICKOFF_MAX_S of
-    it: (goal tag, frame the ball went in, kickoff frame, how the moment was found). Searched from
-    GOAL_LOOK_BEFORE_S before the tag to the kickoff: the first frame with the ball seen over a goal
-    line between the posts; else the first frame of a ball gap of at least GOAL_GAP_FRAMES that
-    starts with the ball last seen inside a penalty area; else the goal tag's start. Pure pitch
-    geometry; nothing measured on a match."""
-    kickoffs = _kickoffs_after_goal(events)
+    """For each GOALS tag paired with its "Kick Off (After Goal)" tag: (goal tag, frame the ball
+    went in, kickoff frame, how the moment was found).
+
+    First pass: the first after-goal kickoff opening within GOAL_KICKOFF_MAX_S after the goal tag
+    opens. The goal is then searched from GOAL_LOOK_BEFORE_S before the tag to the kickoff: the
+    first frame with the ball seen over a goal line between the posts; else the first frame of a
+    ball gap of at least GOAL_GAP_FRAMES that starts with the ball last seen inside a penalty
+    area; else the goal tag's start.
+
+    Second pass, for goal tags still unpaired (a tag that opens after its kickoff, or long before
+    it): goal tags and after-goal kickoffs come in pairs, so the unpaired ones are matched in time
+    order when they lie within GOAL_PAIR_MAX_S of each other. The goal is then the LAST such ball
+    event in the GOAL_KICKOFF_MAX_S before the kickoff (the last time the ball went in before the
+    restart); when there is none, nothing is forced for that goal. Pure pitch geometry and tag
+    order; nothing measured on a match."""
+    kickoffs = list(_kickoffs_after_goal(events))
+    goals = sorted((e for e in events if e["code"] == "GOALS"), key=lambda e: e["start"])
+    over = box = seen = None
     if ball is not None and pitch is not None:
         length, width = pitch
         bx, by = ball[:, 0] * length, ball[:, 1] * width
@@ -433,29 +447,45 @@ def goal_moments(events, ball, pitch, n_frames):
                 ((bx < -GOAL_LINE_BEYOND_M) | (bx > length + GOAL_LINE_BEYOND_M))
             box = seen & (np.abs(by - width / 2) <= BOX_HALF_WIDTH_M) & \
                 ((bx < BOX_DEPTH_M) | (bx > length - BOX_DEPTH_M))
-    out = []
-    for ev in events:
-        if ev["code"] != "GOALS" or not len(kickoffs):
-            continue
+
+    def events_in(s, e):
+        """Ball-in-the-goal candidates in [s, e): (frame, how) in time order."""
+        if over is None or e <= s:
+            return []
+        out = [(s + int(k), "over the line") for k in np.flatnonzero(over[s:e])]
+        for k in np.flatnonzero(box[s:e]):
+            f = s + int(k)
+            if f + 1 + GOAL_GAP_FRAMES <= e and not seen[f + 1:f + 1 + GOAL_GAP_FRAMES].any():
+                out.append((f + 1, "lost in the box"))
+        return sorted(out)
+
+    found, used = {}, set()
+    for gi, ev in enumerate(goals):                       # first pass
         tag_start = max(0, ev["start"])
-        after = kickoffs[kickoffs > tag_start]
-        if not len(after) or after[0] - tag_start > GOAL_KICKOFF_MAX_S * C.FPS:
+        cand = [k for k in kickoffs if k > tag_start and k not in used
+                and k - tag_start <= GOAL_KICKOFF_MAX_S * C.FPS]
+        if not cand:
             continue
-        ko = int(min(after[0], n_frames))
-        moment, how = tag_start, "tag start"
-        if ball is not None and pitch is not None:
-            s = max(0, tag_start - int(GOAL_LOOK_BEFORE_S * C.FPS))
-            hit = np.flatnonzero(over[s:ko])
-            if len(hit):
-                moment, how = s + int(hit[0]), "over the line"
-            else:
-                for k in np.flatnonzero(box[s:ko]):
-                    f = s + int(k)
-                    if f + 1 + GOAL_GAP_FRAMES <= ko and not seen[f + 1:f + 1 + GOAL_GAP_FRAMES].any():
-                        moment, how = f + 1, "lost in the box"
-                        break
-        out.append((ev, moment, ko, how))
-    return out
+        ko = int(min(cand[0], n_frames))
+        used.add(cand[0])
+        s = max(0, tag_start - int(GOAL_LOOK_BEFORE_S * C.FPS))
+        hits = events_in(s, ko)
+        over_hits = [h for h in hits if h[1] == "over the line"]
+        pick = over_hits[0] if over_hits else (hits[0] if hits else (tag_start, "tag start"))
+        found[gi] = (ev, pick[0], ko, pick[1])
+    rest_goals = [gi for gi in range(len(goals)) if gi not in found]
+    rest_kos = [k for k in kickoffs if k not in used]
+    for gi, k in zip(rest_goals, rest_kos):               # second pass, in time order
+        ev = goals[gi]
+        if abs(k - ev["start"]) > GOAL_PAIR_MAX_S * C.FPS:
+            continue
+        ko = int(min(k, n_frames))
+        hits = events_in(max(0, ko - int(GOAL_KICKOFF_MAX_S * C.FPS)), ko)
+        over_hits = [h for h in hits if h[1] == "over the line"]
+        pick = over_hits[-1] if over_hits else (hits[-1] if hits else None)
+        if pick is not None:
+            found[gi] = (ev, pick[0], ko, pick[1] + " (paired by order)")
+    return [found[gi] for gi in sorted(found)]
 
 
 def goal_dead_mask(events, n_frames, blocks, ball=None, pitch=None):
@@ -499,5 +529,5 @@ def apply(params, players, ball, slot_team, events, n_frames, blocks, pitch):
     found = goal_moments(events, ball, pitch, n_frames)
     n_goals = sum(1 for e in events if e["code"] == "GOALS")
     model.goal_moment_sources = [how for _, _, _, how in found] + \
-        ["no kickoff after it"] * (n_goals - len(found))
+        ["not paired or not found"] * (n_goals - len(found))
     return model.decode(blocks, allowed), model, forced

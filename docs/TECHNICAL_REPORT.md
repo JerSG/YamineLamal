@@ -208,8 +208,11 @@ tag's start, not its end.) The moment the ball went in is then found from the tr
 from 10 s before the tag to the kickoff: the ball seen more than 0.2 m over a goal line between the
 posts (with 1 m of tolerance), or else the start of a ball gap of at least 3 s that begins with
 the ball last seen inside a penalty area. When the tracking shows neither, the goal tag's start
-is used. From that moment to the kickoff, frames can only be `D`; a goal tag without such a
-kickoff forces nothing. The run log reports how each goal's moment was found. Viterbi then runs per graded half; ungraded frames are written as `X`, and graded
+is used. A goal tag left unpaired (one that opens after its kickoff, or long before it) is
+matched with the remaining after-goal kickoffs in time order, within 6 minutes, since the two come
+in pairs; its goal is then the last such ball event in the 3 minutes before that kickoff, and
+nothing is forced if there is none. From the goal to the kickoff, frames can only be `D`; a goal
+tag without a kickoff forces nothing. The run log reports how each goal's moment was found. Viterbi then runs per graded half; ungraded frames are written as `X`, and graded
 frames are never `X`.
 
 ## 4.6 Two-camera fusion (input processing; nothing is learned)
