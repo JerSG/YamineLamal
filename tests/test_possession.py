@@ -295,6 +295,25 @@ def test_dead_from_goal_tag_end_until_its_kickoff():
     assert forced[1200:2500].all() and not forced[:1200].any() and not forced[2500:].any()
     late = [dict(ev[1], start=1200 + int(ST.GOAL_KICKOFF_MAX_S * 25) + 1)]
     assert not ST.goal_dead_mask(ev[:1] + late, 20000, [(0, 20000)]).any()
+    # with tracking: the ball seen in the goal at frame 1050 starts the dead ball there
+    pitch = (105.0, 68.0)
+    ball = np.full((8000, 3), np.nan, dtype=np.float32)
+    ball[900:1050, 0] = np.linspace(90, 104.5, 150) / 105
+    ball[900:1050, 1] = 0.5
+    ball[1050:1060, 0] = 105.5 / 105
+    ball[1050:1060, 1] = 0.5
+    forced = ST.goal_dead_mask(ev, 8000, [(0, 8000)], ball, pitch)
+    assert forced[1050:2500].all() and not forced[:1050].any()
+    # ball last seen at the goal mouth, then lost: dead from the frame after
+    ball[1050:1060] = np.nan
+    ball[1030:1050, 0] = 104.0 / 105
+    forced = ST.goal_dead_mask(ev, 8000, [(0, 8000)], ball, pitch)
+    assert forced[1050:2500].all() and not forced[:1050].any()
+    # a shot far from the goal mouth: no moment found, falls back to the tag's end
+    ball[:] = np.nan
+    ball[1000:1200, 0], ball[1000:1200, 1] = 0.5, 0.5
+    forced = ST.goal_dead_mask(ev, 8000, [(0, 8000)], ball, pitch)
+    assert forced[1200:2500].all() and not forced[:1200].any()
 
 
 def test_viewer_page_round_trips_tracking_and_labels():

@@ -402,24 +402,68 @@ def kickoff_dead_mask(events, n_frames, blocks):
 
 
 GOAL_KICKOFF_MAX_S = 180.0   # [football] a goal's kickoff comes within 3 minutes (celebration, VAR)
+GOAL_HALF_WIDTH_M = 3.66     # [football] half the distance between the posts
+GOAL_MARGIN_M = 1.0          # tolerance for tracking error around the posts
+GOAL_LINE_BEYOND_M = 0.2     # ball centre this far over the goal line: in the goal
+GOAL_MOUTH_DEPTH_M = 2.5     # "at the goal mouth": this close to the goal line
+GOAL_LOST_FRAMES = 25        # then lost for at least a second (typically: in the net)
+GOAL_LOOK_AFTER_S = 5.0      # also look this long after the tag ends
 
 
-def goal_dead_mask(events, n_frames, blocks):
+def goal_moments(events, ball, pitch, n_frames):
+    """For each GOALS tag: the frame the ball goes in, from the tracking. The first frame inside
+    the tag (or up to GOAL_LOOK_AFTER_S after it) where the ball is seen over a goal line between
+    the posts, or else where it is last seen at a goal mouth before being lost for a second.
+    When neither is found, the tag's end. Pure geometry of the pitch; nothing measured on a match."""
+    length, width = pitch
+    bx, by = ball[:, 0] * length, ball[:, 1] * width
+    seen = np.isfinite(bx) & np.isfinite(by)
+    with np.errstate(invalid="ignore"):
+        between = seen & (np.abs(by - width / 2) <= GOAL_HALF_WIDTH_M + GOAL_MARGIN_M)
+        over = between & ((bx < -GOAL_LINE_BEYOND_M) | (bx > length + GOAL_LINE_BEYOND_M))
+        mouth = between & ((bx < GOAL_MOUTH_DEPTH_M) | (bx > length - GOAL_MOUTH_DEPTH_M))
+    out = []
+    for ev in events:
+        if ev["code"] != "GOALS":
+            continue
+        s = max(0, ev["start"])
+        e = min(n_frames, ev["end"] + int(GOAL_LOOK_AFTER_S * C.FPS))
+        moment = None
+        hit = np.flatnonzero(over[s:e])
+        if len(hit):
+            moment = s + int(hit[0])
+        else:
+            for k in np.flatnonzero(mouth[s:e]):
+                f = s + int(k)
+                if not seen[f + 1:f + 1 + GOAL_LOST_FRAMES].any() and f + GOAL_LOST_FRAMES < n_frames:
+                    moment = f + 1
+                    break
+        out.append((ev, moment if moment is not None else max(0, ev["end"]),
+                    "over the line" if len(hit) else "lost at the mouth" if moment is not None
+                    else "tag end"))
+    return out
+
+
+def goal_dead_mask(events, n_frames, blocks, ball=None, pitch=None):
     """After a goal the ball is dead until the kickoff that restarts play (Laws of the Game).
-    Conservative, so it never cuts into the move that scored: frames from the END of a GOALS tag
-    to the start of the next "Kick Off (After Goal)" tag can only be dead, when that kickoff opens
-    within GOAL_KICKOFF_MAX_S of the goal tag's end. A goal tag with no such kickoff (a
-    disallowed goal, for instance) forces nothing. Fixed rule, no offset measured on any match."""
+    From the moment the ball goes in (goal_moments: seen in the goal, or lost at the goal mouth;
+    the tag's end when the tracking shows neither, which never cuts into the scoring move) to the
+    start of the next "Kick Off (After Goal)" tag, frames can only be dead, when that kickoff opens
+    within GOAL_KICKOFF_MAX_S. A goal tag with no such kickoff (a disallowed goal, for instance)
+    forces nothing. Fixed rule, no offset measured on any match."""
     kickoffs = np.array(sorted(e["start"] for e in events if e["code"] == "SET PIECES"
                                and e["type"].startswith("kick off (after goal)")))
     forced = np.zeros(n_frames, dtype=bool)
     graded = np.zeros(n_frames, dtype=bool)
     for s, e in blocks:
         graded[s:e] = True
-    for ev in events:
-        if ev["code"] != "GOALS" or not len(kickoffs):
+    if ball is not None and pitch is not None:
+        moments = goal_moments(events, ball, pitch, n_frames)
+    else:
+        moments = [(ev, max(0, ev["end"]), "tag end") for ev in events if ev["code"] == "GOALS"]
+    for ev, start, _ in moments:
+        if not len(kickoffs):
             continue
-        start = max(0, ev["end"])
         after = kickoffs[kickoffs >= start]
         if len(after) and after[0] - start <= GOAL_KICKOFF_MAX_S * C.FPS:
             forced[start:min(int(after[0]), n_frames)] = True
@@ -446,8 +490,9 @@ def apply(params, players, ball, slot_team, events, n_frames, blocks, pitch):
              [PossessionHMM._tables_from(f.init_team, f.init_dead, f) for f in feats[len(tfeats):]]
     model = FrozenHMM(feats, tables, params["transitions"], params["scale"], blocks)
     allowed, forced = kickoff_dead_mask(events, n_frames, blocks)
-    after_goal = goal_dead_mask(events, n_frames, blocks)
+    after_goal = goal_dead_mask(events, n_frames, blocks, ball, pitch)
     allowed[after_goal, 0] = allowed[after_goal, 1] = False
     forced = forced | after_goal
     model.frames_dead_after_goals = int(after_goal.sum())
+    model.goal_moment_sources = [src for _, _, src in goal_moments(events, ball, pitch, n_frames)]
     return model.decode(blocks, allowed), model, forced

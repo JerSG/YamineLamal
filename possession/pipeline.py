@@ -138,13 +138,15 @@ def run_strict(out_path=None, report_path=None, verbose=True, data_dir=None, use
     info.update(stats)
     info["frames_forced_dead"] = int(forced.sum())
     info["frames_dead_after_goals"] = getattr(model, "frames_dead_after_goals", 0)
+    info["goal_moments_found_by"] = getattr(model, "goal_moment_sources", [])
     info["external_scale"] = params["scale"]
     info["checks"] = label_free_checks(labels, ball, model, halves)
     if verbose:
         print("output: {possessions} possessions (mean {mean_possession_s:.1f} s), "
               "{stoppages} stoppages; frames H {H} A {A} D {D}".format(**stats))
-        print("after-goal rule: {} frames dead from the end of a goal tag to its kickoff".format(
-            info["frames_dead_after_goals"]))
+        print("after-goal rule: {} frames dead from the goal to its kickoff; goal moments found by: "
+              "{}".format(info["frames_dead_after_goals"],
+                          ", ".join(info["goal_moments_found_by"]) or "no goal tags"))
         print("checks (aggregates only, no ground truth): " + ", ".join(
             "{} {}".format(k, v) for k, v in info["checks"].items()))
     if out_path:
