@@ -405,68 +405,70 @@ GOAL_KICKOFF_MAX_S = 180.0   # [football] a goal's kickoff comes within 3 minute
 GOAL_HALF_WIDTH_M = 3.66     # [football] half the distance between the posts
 GOAL_MARGIN_M = 1.0          # tolerance for tracking error around the posts
 GOAL_LINE_BEYOND_M = 0.2     # ball centre this far over the goal line: in the goal
-GOAL_MOUTH_DEPTH_M = 2.5     # "at the goal mouth": this close to the goal line
-GOAL_LOST_FRAMES = 25        # then lost for at least a second (typically: in the net)
-GOAL_LOOK_AFTER_S = 5.0      # also look this long after the tag ends
+BOX_DEPTH_M = 16.5           # [football] penalty area
+BOX_HALF_WIDTH_M = 20.16
+GOAL_GAP_FRAMES = 75         # the ball then gone for at least 3 s (in the net, celebrations)
+GOAL_LOOK_BEFORE_S = 10.0    # also look this long before the goal tag opens
+
+
+def _kickoffs_after_goal(events):
+    return np.array(sorted(e["start"] for e in events if e["code"] == "SET PIECES"
+                           and e["type"].startswith("kick off (after goal)")))
 
 
 def goal_moments(events, ball, pitch, n_frames):
-    """For each GOALS tag: the frame the ball goes in, from the tracking. The first frame inside
-    the tag (or up to GOAL_LOOK_AFTER_S after it) where the ball is seen over a goal line between
-    the posts, or else where it is last seen at a goal mouth before being lost for a second.
-    When neither is found, the tag's end. Pure geometry of the pitch; nothing measured on a match."""
-    length, width = pitch
-    bx, by = ball[:, 0] * length, ball[:, 1] * width
-    seen = np.isfinite(bx) & np.isfinite(by)
-    with np.errstate(invalid="ignore"):
-        between = seen & (np.abs(by - width / 2) <= GOAL_HALF_WIDTH_M + GOAL_MARGIN_M)
-        over = between & ((bx < -GOAL_LINE_BEYOND_M) | (bx > length + GOAL_LINE_BEYOND_M))
-        mouth = between & ((bx < GOAL_MOUTH_DEPTH_M) | (bx > length - GOAL_MOUTH_DEPTH_M))
+    """For each GOALS tag with a "Kick Off (After Goal)" tag opening within GOAL_KICKOFF_MAX_S of
+    it: (goal tag, frame the ball went in, kickoff frame, how the moment was found). Searched from
+    GOAL_LOOK_BEFORE_S before the tag to the kickoff: the first frame with the ball seen over a goal
+    line between the posts; else the first frame of a ball gap of at least GOAL_GAP_FRAMES that
+    starts with the ball last seen inside a penalty area; else the goal tag's start. Pure pitch
+    geometry; nothing measured on a match."""
+    kickoffs = _kickoffs_after_goal(events)
+    if ball is not None and pitch is not None:
+        length, width = pitch
+        bx, by = ball[:, 0] * length, ball[:, 1] * width
+        seen = np.isfinite(bx) & np.isfinite(by)
+        with np.errstate(invalid="ignore"):
+            over = seen & (np.abs(by - width / 2) <= GOAL_HALF_WIDTH_M + GOAL_MARGIN_M) & \
+                ((bx < -GOAL_LINE_BEYOND_M) | (bx > length + GOAL_LINE_BEYOND_M))
+            box = seen & (np.abs(by - width / 2) <= BOX_HALF_WIDTH_M) & \
+                ((bx < BOX_DEPTH_M) | (bx > length - BOX_DEPTH_M))
     out = []
     for ev in events:
-        if ev["code"] != "GOALS":
+        if ev["code"] != "GOALS" or not len(kickoffs):
             continue
-        s = max(0, ev["start"])
-        e = min(n_frames, ev["end"] + int(GOAL_LOOK_AFTER_S * C.FPS))
-        moment = None
-        hit = np.flatnonzero(over[s:e])
-        if len(hit):
-            moment = s + int(hit[0])
-        else:
-            for k in np.flatnonzero(mouth[s:e]):
-                f = s + int(k)
-                if not seen[f + 1:f + 1 + GOAL_LOST_FRAMES].any() and f + GOAL_LOST_FRAMES < n_frames:
-                    moment = f + 1
-                    break
-        out.append((ev, moment if moment is not None else max(0, ev["end"]),
-                    "over the line" if len(hit) else "lost at the mouth" if moment is not None
-                    else "tag end"))
+        tag_start = max(0, ev["start"])
+        after = kickoffs[kickoffs > tag_start]
+        if not len(after) or after[0] - tag_start > GOAL_KICKOFF_MAX_S * C.FPS:
+            continue
+        ko = int(min(after[0], n_frames))
+        moment, how = tag_start, "tag start"
+        if ball is not None and pitch is not None:
+            s = max(0, tag_start - int(GOAL_LOOK_BEFORE_S * C.FPS))
+            hit = np.flatnonzero(over[s:ko])
+            if len(hit):
+                moment, how = s + int(hit[0]), "over the line"
+            else:
+                for k in np.flatnonzero(box[s:ko]):
+                    f = s + int(k)
+                    if f + 1 + GOAL_GAP_FRAMES <= ko and not seen[f + 1:f + 1 + GOAL_GAP_FRAMES].any():
+                        moment, how = f + 1, "lost in the box"
+                        break
+        out.append((ev, moment, ko, how))
     return out
 
 
 def goal_dead_mask(events, n_frames, blocks, ball=None, pitch=None):
-    """After a goal the ball is dead until the kickoff that restarts play (Laws of the Game).
-    From the moment the ball goes in (goal_moments: seen in the goal, or lost at the goal mouth;
-    the tag's end when the tracking shows neither, which never cuts into the scoring move) to the
-    start of the next "Kick Off (After Goal)" tag, frames can only be dead, when that kickoff opens
-    within GOAL_KICKOFF_MAX_S. A goal tag with no such kickoff (a disallowed goal, for instance)
-    forces nothing. Fixed rule, no offset measured on any match."""
-    kickoffs = np.array(sorted(e["start"] for e in events if e["code"] == "SET PIECES"
-                               and e["type"].startswith("kick off (after goal)")))
+    """After a goal the ball is dead until the kickoff that restarts play (Laws of the Game):
+    frames from the moment the ball went in (goal_moments) to the start of the "Kick Off (After
+    Goal)" tag can only be dead. A goal tag with no such kickoff within GOAL_KICKOFF_MAX_S (a
+    disallowed goal, for instance) forces nothing. Fixed rule, no offset measured on any match."""
     forced = np.zeros(n_frames, dtype=bool)
     graded = np.zeros(n_frames, dtype=bool)
     for s, e in blocks:
         graded[s:e] = True
-    if ball is not None and pitch is not None:
-        moments = goal_moments(events, ball, pitch, n_frames)
-    else:
-        moments = [(ev, max(0, ev["end"]), "tag end") for ev in events if ev["code"] == "GOALS"]
-    for ev, start, _ in moments:
-        if not len(kickoffs):
-            continue
-        after = kickoffs[kickoffs >= start]
-        if len(after) and after[0] - start <= GOAL_KICKOFF_MAX_S * C.FPS:
-            forced[start:min(int(after[0]), n_frames)] = True
+    for _, moment, ko, _ in goal_moments(events, ball, pitch, n_frames):
+        forced[moment:ko] = True
     return forced & graded
 
 
@@ -494,5 +496,8 @@ def apply(params, players, ball, slot_team, events, n_frames, blocks, pitch):
     allowed[after_goal, 0] = allowed[after_goal, 1] = False
     forced = forced | after_goal
     model.frames_dead_after_goals = int(after_goal.sum())
-    model.goal_moment_sources = [src for _, _, src in goal_moments(events, ball, pitch, n_frames)]
+    found = goal_moments(events, ball, pitch, n_frames)
+    n_goals = sum(1 for e in events if e["code"] == "GOALS")
+    model.goal_moment_sources = [how for _, _, _, how in found] + \
+        ["no kickoff after it"] * (n_goals - len(found))
     return model.decode(blocks, allowed), model, forced

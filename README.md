@@ -140,7 +140,8 @@ byte. To compare two runs, `Get-FileHash submission\YamineLamal.csv` (Windows) o
 * **Fixed rules, no data:** each run of identical feature values is one observation, capped at
   one per second. Smart Tagging tables are fixed priors. Set-piece tags are split into quarters.
   A half is dead before its kickoff tag opens, and the ball is dead from the moment a tagged goal
-  goes in (seen in the goal, or lost at the goal mouth) to the kickoff after it.
+  goes in (seen in the goal, or lost in the box for good; else the goal tag's start) to the
+  kickoff after it.
 * **Robust to tracking noise:** speeds are measured over half a second, so position jitter
   cannot pass for movement, and a track jumping to another object is ignored.
 * **Held-out results** (`scripts/benchmark.py`, mean spellF1; DFL under six tracking-problem

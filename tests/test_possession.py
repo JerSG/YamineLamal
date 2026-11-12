@@ -283,37 +283,34 @@ def test_speeds_over_a_chord_ignore_position_noise():
     assert abs(chord[1] - 1.5) < 0.3
 
 
-def test_dead_from_goal_tag_end_until_its_kickoff():
-    """After a goal the ball is dead until the kickoff after the goal; the scoring move itself
-    (inside the goal tag) is left to the model; a goal with no kickoff after it forces nothing."""
+def test_dead_from_the_goal_until_its_kickoff():
+    """After a goal the ball is dead until the kickoff after the goal, whether the goal tag ends
+    before or after that kickoff; the goal moment comes from the tracking when it shows it."""
     from possession import strict as ST
-    ev = [{"code": "GOALS", "type": "", "team": 0, "start": 1000, "end": 1200},
+    pitch = (105.0, 68.0)
+    ev = [{"code": "GOALS", "type": "", "team": 0, "start": 1000, "end": 3000},   # spans the kickoff
           {"code": "SET PIECES", "type": "kick off (after goal)", "team": 1, "start": 2500,
            "end": 2600},
-          {"code": "GOALS", "type": "", "team": 1, "start": 5000, "end": 5100}]
+          {"code": "GOALS", "type": "", "team": 1, "start": 5000, "end": 5100}]     # no kickoff
+    # no tracking: from the goal tag's start
     forced = ST.goal_dead_mask(ev, 8000, [(0, 8000)])
-    assert forced[1200:2500].all() and not forced[:1200].any() and not forced[2500:].any()
-    late = [dict(ev[1], start=1200 + int(ST.GOAL_KICKOFF_MAX_S * 25) + 1)]
-    assert not ST.goal_dead_mask(ev[:1] + late, 20000, [(0, 20000)]).any()
-    # with tracking: the ball seen in the goal at frame 1050 starts the dead ball there
-    pitch = (105.0, 68.0)
+    assert forced[1000:2500].all() and not forced[:1000].any() and not forced[2500:].any()
+    # ball seen in the goal at 1050 (before it, a shot travelling in)
     ball = np.full((8000, 3), np.nan, dtype=np.float32)
     ball[900:1050, 0] = np.linspace(90, 104.5, 150) / 105
-    ball[900:1050, 1] = 0.5
+    ball[900:1060, 1] = 0.5
     ball[1050:1060, 0] = 105.5 / 105
-    ball[1050:1060, 1] = 0.5
     forced = ST.goal_dead_mask(ev, 8000, [(0, 8000)], ball, pitch)
     assert forced[1050:2500].all() and not forced[:1050].any()
-    # ball last seen at the goal mouth, then lost: dead from the frame after
-    ball[1050:1060] = np.nan
-    ball[1030:1050, 0] = 104.0 / 105
-    forced = ST.goal_dead_mask(ev, 8000, [(0, 8000)], ball, pitch)
-    assert forced[1050:2500].all() and not forced[:1050].any()
-    # a shot far from the goal mouth: no moment found, falls back to the tag's end
+    # ball lost in the box for good (into the net) at 1100, the tag opening a bit after the goal
     ball[:] = np.nan
-    ball[1000:1200, 0], ball[1000:1200, 1] = 0.5, 0.5
-    forced = ST.goal_dead_mask(ev, 8000, [(0, 8000)], ball, pitch)
-    assert forced[1200:2500].all() and not forced[:1200].any()
+    ball[900:1100, 0], ball[900:1100, 1] = 100.0 / 105, 0.5
+    ev2 = [dict(ev[0], start=1150)] + ev[1:]
+    forced = ST.goal_dead_mask(ev2, 8000, [(0, 8000)], ball, pitch)
+    assert forced[1100:2500].all() and not forced[:1100].any()
+    # a kickoff more than 3 minutes after the tag: nothing forced
+    late = [dict(ev[1], start=1000 + int(ST.GOAL_KICKOFF_MAX_S * 25) + 1)]
+    assert not ST.goal_dead_mask(ev[:1] + late, 20000, [(0, 20000)]).any()
 
 
 def test_viewer_page_round_trips_tracking_and_labels():

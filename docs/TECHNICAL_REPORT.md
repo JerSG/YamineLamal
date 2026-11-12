@@ -202,12 +202,13 @@ into quarters of their own length, a fixed rule. **Kickoffs:** frames of a grade
 kickoff tag opens can only be `D`, which covers the graded dead frames before the second-half
 kickoff that FAQ.md mentions. The tag's own start is the boundary, and no offset is measured on
 the match. **Goals:** after a goal the ball is dead until the kickoff that restarts play (Laws of
-the Game). Inside each `GOALS` tag (and up to 5 s after it), the moment the ball goes in is found
-from the tracking: the ball seen more than 0.2 m over a goal line between the posts (with 1 m of
-tolerance), or else last seen within 2.5 m of a goal line between the posts and then lost for at
-least a second. From that moment to the start of the next `Kick Off (After Goal)` tag, frames
-can only be `D`, when that kickoff opens within 3 minutes. When the tracking shows neither, the
-tag's end is used instead, which never cuts into the move that scored; a goal tag without such a
+the Game). Each `GOALS` tag is paired with the first `Kick Off (After Goal)` tag that opens after
+the goal tag does, within 3 minutes. (A goal tag can run past its kickoff, so the pairing uses the
+tag's start, not its end.) The moment the ball went in is then found from the tracking, searching
+from 10 s before the tag to the kickoff: the ball seen more than 0.2 m over a goal line between the
+posts (with 1 m of tolerance), or else the start of a ball gap of at least 3 s that begins with
+the ball last seen inside a penalty area. When the tracking shows neither, the goal tag's start
+is used. From that moment to the kickoff, frames can only be `D`; a goal tag without such a
 kickoff forces nothing. The run log reports how each goal's moment was found. Viterbi then runs per graded half; ungraded frames are written as `X`, and graded
 frames are never `X`.
 
@@ -419,7 +420,7 @@ the same platform.
 * **Fixed rules and priors** (not tuned on any data): the Smart Tagging prior tables, the quantile
   levels, the one-observation-per-second cap, the set-piece quarters, the 2 m control radius and
   the broadcast thresholds, the touch, still-ball and kick thresholds, the restart places, the
-goal-mouth geometry and 3-minute bound of the after-goal rule and the
+goal and penalty-area geometry, 3-second gap and 3-minute bound of the after-goal rule and the
 maximum player and ball speeds. The speed chord (±6 frames) was chosen on the external benchmark. Some were
 written down while working on this project. None was chosen
   by scoring against any competition data.
