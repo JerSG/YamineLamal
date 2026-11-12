@@ -283,6 +283,20 @@ def test_speeds_over_a_chord_ignore_position_noise():
     assert abs(chord[1] - 1.5) < 0.3
 
 
+def test_dead_from_goal_tag_end_until_its_kickoff():
+    """After a goal the ball is dead until the kickoff after the goal; the scoring move itself
+    (inside the goal tag) is left to the model; a goal with no kickoff after it forces nothing."""
+    from possession import strict as ST
+    ev = [{"code": "GOALS", "type": "", "team": 0, "start": 1000, "end": 1200},
+          {"code": "SET PIECES", "type": "kick off (after goal)", "team": 1, "start": 2500,
+           "end": 2600},
+          {"code": "GOALS", "type": "", "team": 1, "start": 5000, "end": 5100}]
+    forced = ST.goal_dead_mask(ev, 8000, [(0, 8000)])
+    assert forced[1200:2500].all() and not forced[:1200].any() and not forced[2500:].any()
+    late = [dict(ev[1], start=1200 + int(ST.GOAL_KICKOFF_MAX_S * 25) + 1)]
+    assert not ST.goal_dead_mask(ev[:1] + late, 20000, [(0, 20000)]).any()
+
+
 def test_viewer_page_round_trips_tracking_and_labels():
     """The replay page embeds subsampled, quantised tracking and run-length labels, and nothing
     else is needed to open it."""

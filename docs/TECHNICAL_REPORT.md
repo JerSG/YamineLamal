@@ -201,7 +201,11 @@ so its three features use **fixed prior tables**, which are not learned. Set-pie
 into quarters of their own length, a fixed rule. **Kickoffs:** frames of a graded half before its
 kickoff tag opens can only be `D`, which covers the graded dead frames before the second-half
 kickoff that FAQ.md mentions. The tag's own start is the boundary, and no offset is measured on
-the match. Viterbi then runs per graded half; ungraded frames are written as `X`, and graded
+the match. **Goals:** after a goal the ball is dead until the kickoff that restarts play (Laws of
+the Game), so frames from the *end* of a `GOALS` tag to the start of the next `Kick Off (After
+Goal)` tag can only be `D`, when that kickoff opens within 3 minutes. Starting at the tag's end,
+not its start, never cuts into the move that scored; a goal tag without such a kickoff forces
+nothing. The softer `goal` feature still applies inside the tag. Viterbi then runs per graded half; ungraded frames are written as `X`, and graded
 frames are never `X`.
 
 ## 4.6 Two-camera fusion (input processing; nothing is learned)
@@ -297,7 +301,8 @@ and the existing ball features are in (+0.0005).
   restart place) or one over a line, the ball lost right after going out, a long ball gap, the
   early part of a set-piece tag, or a goal celebration. A still ball being struck marks the
   restart.
-  Before each kickoff tag it is dead by rule.
+  Before each kickoff tag, and from the end of a goal tag to the kickoff after the goal, it is
+  dead by rule.
 * **Loose and contested balls** do not change possession by themselves: the last team to touch
   the ball keeps it, and a contested touch clears the last-touch evidence. A change needs the other
   team to touch or be on the ball, with enough evidence to pay for a transition. A deflection or a
@@ -399,13 +404,18 @@ the same platform.
   of its parameters comes from it. Our only use of the public ground truth was early in
   development: looking at its segments to understand what counts as possession, and as a smoke
   test of early versions of the pipeline.
+* **The after-goal rule** (4.5) was added after we saw, in the replay of our own output, labels of
+  possession during a goal celebration. Inspecting the data to debug the pipeline is allowed; the
+  fix is a general rule of the game, the same for every goal, with no frame or time taken from the
+  match, and it was not scored against any ground truth.
 * **No constant is measured on the match:** every bin edge and the team-shape model are learned
   on the external matches, and the kickoff and goal features use the Smart Tagging's own tag
   boundaries, with no offset. The only figure taken from the organisers' documents is the 41%
   ball-missing share (DATA.md) used to simulate gaps in the external benchmark.
 * **Fixed rules and priors** (not tuned on any data): the Smart Tagging prior tables, the quantile
   levels, the one-observation-per-second cap, the set-piece quarters, the 2 m control radius and
-  the broadcast thresholds, the touch, still-ball and kick thresholds, the restart places and the
+  the broadcast thresholds, the touch, still-ball and kick thresholds, the restart places, the
+3-minute bound of the after-goal rule and the
 maximum player and ball speeds. The speed chord (±6 frames) was chosen on the external benchmark. Some were
 written down while working on this project. None was chosen
   by scoring against any competition data.

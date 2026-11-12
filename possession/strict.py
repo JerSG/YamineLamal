@@ -401,6 +401,31 @@ def kickoff_dead_mask(events, n_frames, blocks):
     return allowed, forced
 
 
+GOAL_KICKOFF_MAX_S = 180.0   # [football] a goal's kickoff comes within 3 minutes (celebration, VAR)
+
+
+def goal_dead_mask(events, n_frames, blocks):
+    """After a goal the ball is dead until the kickoff that restarts play (Laws of the Game).
+    Conservative, so it never cuts into the move that scored: frames from the END of a GOALS tag
+    to the start of the next "Kick Off (After Goal)" tag can only be dead, when that kickoff opens
+    within GOAL_KICKOFF_MAX_S of the goal tag's end. A goal tag with no such kickoff (a
+    disallowed goal, for instance) forces nothing. Fixed rule, no offset measured on any match."""
+    kickoffs = np.array(sorted(e["start"] for e in events if e["code"] == "SET PIECES"
+                               and e["type"].startswith("kick off (after goal)")))
+    forced = np.zeros(n_frames, dtype=bool)
+    graded = np.zeros(n_frames, dtype=bool)
+    for s, e in blocks:
+        graded[s:e] = True
+    for ev in events:
+        if ev["code"] != "GOALS" or not len(kickoffs):
+            continue
+        start = max(0, ev["end"])
+        after = kickoffs[kickoffs >= start]
+        if len(after) and after[0] - start <= GOAL_KICKOFF_MAX_S * C.FPS:
+            forced[start:min(int(after[0]), n_frames)] = True
+    return forced & graded
+
+
 def apply(params, players, ball, slot_team, events, n_frames, blocks, pitch):
     """Labels H/A/D per frame (codes 0/1/2; -1 outside blocks) with the frozen parameters."""
     sm = params["shape_model"]
@@ -421,4 +446,8 @@ def apply(params, players, ball, slot_team, events, n_frames, blocks, pitch):
              [PossessionHMM._tables_from(f.init_team, f.init_dead, f) for f in feats[len(tfeats):]]
     model = FrozenHMM(feats, tables, params["transitions"], params["scale"], blocks)
     allowed, forced = kickoff_dead_mask(events, n_frames, blocks)
+    after_goal = goal_dead_mask(events, n_frames, blocks)
+    allowed[after_goal, 0] = allowed[after_goal, 1] = False
+    forced = forced | after_goal
+    model.frames_dead_after_goals = int(after_goal.sum())
     return model.decode(blocks, allowed), model, forced
