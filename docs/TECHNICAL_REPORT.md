@@ -42,8 +42,9 @@ Main components:
   confirmed on two DFL matches held back from all development. There it scores **0.495**
   against **0.312** for our first model (trained on Metrica only, five tracking features).
 
-There is no competition score to report: the ground truth is private, and we did not evaluate the
-submitted model against the public 5-minute window (Section 7).
+There is no competition score to report: the ground truth is private. The final file was scored
+once on the public 5-minute window, after the model was frozen, only to check that the pipeline is
+correct; nothing was changed afterwards (Section 7).
 
 # 2. Why this approach
 
@@ -70,7 +71,7 @@ ten external matches. The held-out results in Section 6 show the transfer.
 | DFL open data, 7 matches (external) | training, tuning and the benchmark | Bassek et al. 2025, CC BY 4.0 (Section 8) |
 | tactical homography (competition) | **dropped** | a camera-zone feature was considered and dropped: no external equivalent to learn it from |
 | tactical and broadcast videos | **dropped** | see 4.8 |
-| public ground truth | **not used** for the submitted model | Section 7 |
+| public ground truth | **not used** to build or tune the model; one pipeline check after freezing | Section 7 |
 
 **Data checks.** The tactical ATD has 199,319 contiguous records. The organisers' own
 `starter/baseline.py`, run on our copy, reproduces their four published baseline files byte for
@@ -416,10 +417,13 @@ the same platform.
   ground truth or its video. The match's tracking, Smart Tagging and broadcast data are inputs.
   The broadcast alignment is an automatic check using only the provided data, with thresholds fixed
   in advance.
-* **Ground truth:** the submitted model was never scored on the public 5-minute window, and none
-  of its parameters comes from it. Our only use of the public ground truth was early in
-  development: looking at its segments to understand what counts as possession, and as a smoke
-  test of early versions of the pipeline.
+* **Ground truth:** none of the model's parameters, rules or choices comes from the public
+  5-minute window. Early in development we looked at its segments to understand what counts as
+  possession and used it as a smoke test of early versions of the pipeline. The final file was
+  scored on it once, after everything was frozen, as the organisers intend: to check that frames
+  are aligned and labels mean what we think (spellF1 0.579, macroF1 0.699; home share 57.4%
+  against 57.3%, so home and away are not swapped). With 17 possessions this says little about
+  the full match, and nothing was changed afterwards.
 * **The after-goal rule** (4.5) was added after we saw, in the replay of our own output, labels of
   possession during goal celebrations, including just after the ball went in. Inspecting the data
   to debug the pipeline is allowed; the fix is a general rule of the game, the same for every
