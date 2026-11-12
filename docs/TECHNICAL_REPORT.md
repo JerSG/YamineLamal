@@ -153,15 +153,16 @@ the label 88% of the time, and 75% where the ball is missing.
 
 **Still ball** (`possession/deadball.py`). A ball tracked and slower than 1 m/s for at least
 1 s, at a restart place (within 2 m of a line, within 2.5 m of the centre spot or a penalty spot,
-or in a goal area) or elsewhere. Players walk on 47.5% of dead frames against 3.7% of live ones;
-a still ball is 6.4% of dead frames against 2.5% of live ones.
+or in a goal area) or elsewhere. Players walk on 49.3% of dead frames against 3.9% of live ones;
+a still ball is 5.9% of dead frames against 2.7% of live ones.
 
 **Restart kick** (`possession/deadball.py`). When a still ball (as above) is struck faster than
 5 m/s within a second of the end of its still run, the following second is marked as a kick, by
 the team with a player within 2 m of the ball (and 0.75 m closer than any opponent) when it was
-struck. It dates the end of a stoppage and names the restarting team. On the Metrica games,
-92-100% of marked kick frames are in the kicking team's possession; kicks are rare there (30-60
-per game) because their ball is usually untracked during dead play.
+struck. It dates the end of a stoppage and names the restarting team. On the training data,
+97.5% (Metrica) and 98.9% (DFL) of marked kick frames are in the kicking team's possession. Kicks
+are rare there (87 in the three Metrica games, 118 in the seven DFL matches) because the ball is
+usually untracked during dead play.
 
 ## 4.3 Model
 
@@ -316,7 +317,7 @@ higher (their labels are made the way the ground truth is), its Metrica mean is 
 * **Development:** the three Metrica games and five DFL matches. For each one, everything (bin
   edges, team-shape model, tables, transitions, scale) is learned on the other development
   matches and the held-out one is decoded and scored with the organisers' spellF1. Metrica games
-  are scored with their own tracking gaps. DFL matches are scored under five gap profiles
+  are scored with their own tracking gaps. DFL matches are scored under six profiles
   (`possession/degrade.py`), each with three seeds: `markov` (gaps as on the Metrica tracking),
   `short` (mean 0.5 s), `long` (4 s), `crowded` (2 s, starting where players crowd the ball),
   each removing 41% of the ball as DATA.md reports, `smooth` (markov gaps, ball smoothed
@@ -426,22 +427,24 @@ source.
 
 * **Domain gap.** The external matches come from other trackers and leagues; the competition
   tracking is automatic, fragmented and noisier. The DFL gaps are simulated, not real tracker
-  failures. The evidence cap, the five gap profiles and the flat scale curve limit the risk, but
+  failures. The evidence cap, the six benchmark profiles (including fragmented, noisy tracks), the
+  noise-robust speeds and the flat scale curve limit the risk, but
   frozen tables cannot adapt to this match's noise.
 * **Label conventions.** DFL's tracking-based labels follow the same definition as the ground
   truth, but each provider applies it its own way, and the Metrica labels are event-derived. The
   external scores therefore show transfer; they do not predict ours.
 * **A small final check.** Two reserved matches are strong evidence of direction (the gain held on
-  both, under every profile), not a precise estimate of its size.
+  both, under every profile, and on a second held-out split), not a precise estimate of its size.
+  They were used for more than one decision (Section 6), which weakens them as an untouched test.
 * **Smart Tagging is not learned.** Its tables are fixed priors, since no external game has tags.
 * **Turnovers while the ball is untracked.** Broadcast fusion recovers 4,763 frames; elsewhere,
   the team-shape model and the slower features have to move possession, and the shape model is
   right less often without the ball (75%) than with it. Ball detection in the video could target
   this, if it can be validated (4.8).
 * **Durations.** The model treats possession and stoppage durations as geometric. Measured on the
-  external games, that is close to reality: possession lengths vary *more* than geometric
-  (coefficient of variation 1.16, with 16% of possessions shorter than 2 s), and stoppages vary
-  about as much (0.92). A semi-Markov model, which would favour typical lengths, is therefore not
+  external matches' labels, that is close to reality: possession lengths vary *more* than
+  geometric (coefficient of variation 1.16 on Metrica and 1.37 on DFL, with 16% and 30% of
+  possessions shorter than 2 s), and stoppages vary about as much (0.92 and 0.88). A semi-Markov model, which would favour typical lengths, is therefore not
   expected to help.
 
 # 10. Reproduction
