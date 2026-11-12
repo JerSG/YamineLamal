@@ -135,6 +135,16 @@ function pitch() {
     const x0 = side ? W - M : M, d = side ? -1 : 1;
     cx.strokeRect(Math.min(x0, x0 + d * 16.5 * sx), H / 2 - 20.16 * sy, 16.5 * sx, 40.32 * sy);
     cx.strokeRect(Math.min(x0, x0 + d * 5.5 * sx), H / 2 - 9.16 * sy, 5.5 * sx, 18.32 * sy);
+    // goal: 7.32 m between the posts, drawn 2 m deep behind the goal line, with a light net
+    const gd = 2 * sx, gx = side ? x0 : x0 - gd, gy = H / 2 - 3.66 * sy, gh = 7.32 * sy;
+    cx.fillStyle = 'rgba(255,255,255,0.14)'; cx.fillRect(gx, gy, gd, gh);
+    cx.save(); cx.lineWidth = 0.7; cx.strokeStyle = 'rgba(255,255,255,0.35)';
+    for (let k = 1; k < 6; k++) { cx.beginPath(); cx.moveTo(gx, gy + k * gh / 6); cx.lineTo(gx + gd, gy + k * gh / 6); cx.stroke(); }
+    for (let k = 1; k < 3; k++) { cx.beginPath(); cx.moveTo(gx + k * gd / 3, gy); cx.lineTo(gx + k * gd / 3, gy + gh); cx.stroke(); }
+    cx.restore();
+    cx.save(); cx.lineWidth = 3.5; cx.strokeStyle = '#ffffff';
+    cx.beginPath(); cx.moveTo(x0, gy); cx.lineTo(x0 - d * gd, gy); cx.lineTo(x0 - d * gd, gy + gh); cx.lineTo(x0, gy + gh); cx.stroke();
+    cx.restore();
   }
 }
 function draw(i) {
@@ -144,10 +154,14 @@ function draw(i) {
     const qx = P[base + 2 * s], qy = P[base + 2 * s + 1];
     if (qx === NAN) continue;
     const px = X(qx / 65534), py = Y(qy / 65534), kit = KIT[D.slot_team[s]];
-    cx.beginPath(); cx.arc(px, py, 8, Math.PI / 2, 3 * Math.PI / 2); cx.closePath();
-    cx.fillStyle = kit[0]; cx.fill();
-    cx.beginPath(); cx.arc(px, py, 8, -Math.PI / 2, Math.PI / 2); cx.closePath();
-    cx.fillStyle = kit[1]; cx.fill();
+    if (kit[0] === kit[1]) {          // one colour: a plain dot, no seam
+      cx.beginPath(); cx.arc(px, py, 8, 0, 2 * Math.PI); cx.fillStyle = kit[0]; cx.fill();
+    } else {                          // two colours: left and right halves
+      cx.beginPath(); cx.arc(px, py, 8, Math.PI / 2, 3 * Math.PI / 2); cx.closePath();
+      cx.fillStyle = kit[0]; cx.fill();
+      cx.beginPath(); cx.arc(px, py, 8, -Math.PI / 2, Math.PI / 2); cx.closePath();
+      cx.fillStyle = kit[1]; cx.fill();
+    }
     cx.beginPath(); cx.arc(px, py, 8, 0, 2 * Math.PI);
     cx.lineWidth = 1.5; cx.strokeStyle = 'rgba(0,0,0,.7)'; cx.stroke();
   }
