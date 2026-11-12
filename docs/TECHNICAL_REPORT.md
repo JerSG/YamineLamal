@@ -393,12 +393,21 @@ scale costs little.
 These scores show transfer between matches; they do not predict the competition score, which
 depends on that match's tracking and its own ground truth.
 
-**Full match.** `run.py` prints the output's possession and stoppage counts and a set of
-label-free checks (ball-missing shares in live and dead output, dead share per half, coverage of
-the last-touch and team-shape features), stored in `submission/YamineLamal_report.json`.
+**Full match.** The submitted file has 466 possessions (mean 8.6 s) and 144 stoppages, with
+frames H 57,569 / A 42,407 / D 58,881 / X 40,462 (37.1% of graded frames dead: 37.1% in the first
+half, 37.0% in the second). Broadcast fusion accepted 110 of 160 camera shots and filled 4,763
+tactical frames without a ball (ball check: 0.76 m median). The after-goal rule found the goal
+moment for three of the four goal tags (each from the ball lost in the penalty area for good; one
+paired with its kickoff by time order) and made 8,344 frames dead between those goals and their
+kickoffs; the fourth tag had no matching kickoff and ball event, and nothing was forced for it.
+Label-free checks, computed without any ground truth: the ball is missing on 84.1% of the frames
+labelled dead against 10.4% of those labelled live, the last-touch feature is known on 49.9% of
+graded frames and the team-shape model on 94.9%. These figures are printed by `run.py` and stored
+in `submission/YamineLamal_report.json`.
 
-**Reproducibility.** The pipeline has no randomness. Two runs of `run.py` on the same data give
-the identical file. Re-training on the external matches gives the same `external_params.json` on
+**Reproducibility.** The pipeline has no randomness: two runs of `run.py` on the same data give
+the identical file. On this match, two runs in separate installations gave the same figures
+throughout. Re-training on the external matches gives the same `external_params.json` on
 the same platform.
 
 # 7. Use of the provided data and the ground truth
@@ -455,6 +464,11 @@ source.
   both, under every profile, and on a second held-out split), not a precise estimate of its size.
   They were used for more than one decision (Section 6), which weakens them as an untouched test.
 * **Smart Tagging is not learned.** Its tables are fixed priors, since no external game has tags.
+* **Goals the tracking does not show.** The after-goal rule needs the goal tag paired with an
+  after-goal kickoff and a ball event (over the goal line, or lost in the penalty area for good).
+  On this match it applied to three of four goal tags. Where it does not apply, only the softer
+  goal feature acts, and the seconds after a goal can stay labelled as possession. It cannot be
+  scored on external data, since no external match has Smart Tagging goal tags.
 * **Turnovers while the ball is untracked.** Broadcast fusion recovers 4,763 frames; elsewhere,
   the team-shape model and the slower features have to move possession, and the shape model is
   right less often without the ball (75%) than with it. Ball detection in the video could target
