@@ -36,10 +36,12 @@ Main components:
   never more than one per second, which keeps the frozen model stable on noisier tracking.
 * **Speeds robust to tracking noise:** player and ball speeds are measured over half a second,
   so position jitter cannot pass for movement.
+* **Ball-track correction:** before the features, one-frame ball glitches are removed and ball
+  gaps of up to a second are bridged when the flight is physically possible (4.7).
 * **A benchmark on external matches** (Section 6): every design choice was kept only if it raised
   the held-out spellF1 under six kinds of simulated tracking problems (ball gaps of several kinds,
   a smoothed ball, fragmented anonymous tracks with position noise), and the final model was then
-  confirmed on two DFL matches held back from all development. There it scores **0.495**
+  confirmed on two DFL matches held back from all development. There it scores **0.508**
   against **0.312** for our first model (trained on Metrica only, five tracking features).
 
 There is no competition score to report: the ground truth is private. The final file was scored
@@ -257,6 +259,7 @@ follows.
 | **possession while the ball is missing** | the `lasttouch` feature carries the team that last played the ball through short gaps, and the team-shape model gives evidence on frames without a ball (75% agreement there on the training data); a change of state also costs a transition, so without contrary evidence the last team keeps possession |
 | **players missing** | features are built from whoever is tracked. A quantity that cannot be measured reliably becomes a **neutral** value, with a likelihood ratio of 1, never a guess: mean speed when fewer than 8 players are tracked, team spread when a team has fewer than 5, ball speed, ball position and still ball when the ball is missing (except "lost right after going out", which is evidence), team shape when a team has fewer than 5 players tracked, last touch after a second without a ball |
 | **position noise** | speeds are measured over a chord of ±6 frames (0.48 s) rather than frame to frame, so random jitter cancels out instead of adding up: with 10 cm of noise, frame-to-frame speeds read about 4.6 m/s for standing players, which erased the "players walk during stoppages" evidence in our tests. The benchmark's `full` profile adds this noise (Section 6) |
+| **ball glitches and short ball gaps** | an algorithmic correction of the ball track runs before the features (`possession/correct.py`), with physical thresholds fixed in advance: a ball position more than 5 m from the midpoint of its two tracked neighbours is a false detection and is removed, and a ball missing for at most 25 frames (1 s) between two tracked positions is filled with the straight line between them, when that flight is under 45 m/s. The training data is corrected the same way. Longer gaps stay gaps |
 | **identity switches** | no feature follows an individual player. They use which **team** is nearest the ball and team-level aggregates (the team-shape model included), so a track slot changing player does not matter. The one per-slot quantity, speed from consecutive positions, is smoothed over ±0.2 s per player, averaged over all tracked players and smoothed again over ±0.5 s, which limits a jump in one slot to a brief, diluted blip; a speed above 12 m/s (faster than any player) is a track jumping to another object and is dropped. In the benchmark, cutting every track into anonymous fragments over 46 slots changed no score |
 | **duplicated objects** (more than 22 tracked) | nearest-player distances are unaffected; aggregates change marginally |
 | **smoothed ball** | the competition's automatic ball track is smoothed over about a second, which blurs touches. Touches are measured over 0.48 s chords, and the benchmark includes a profile with the ball smoothed over 1 s (Section 6), where the model keeps its advantage |
@@ -296,9 +299,15 @@ its strength setting changing between folds (0.10 and 0.20). The +0.017 mean is 
 of a three-game test, and the classifier has no cap on evidence for tracking noisier than its
 training data, so it was not adopted.
 
-On the benchmark of Section 6, two more were rejected: the momentary touch itself (as opposed
-to the last touch: no gain once `lasttouch` is in), and "gap context" (where the ball was lost and
-where it reappears), which separates dead from live play well (57% of dead frames are "lost at a
+On the benchmark of Section 6, four more were rejected. A separate team-shape model for frames
+without a ball, adding where the ball was last seen and which team last touched it (89% right on
+those frames on a held-out Metrica game, against 38% for the shape model alone): +0.006 on the DFL
+development matches but −0.008 on Metrica, a tie on the reserved matches and a loss on
+SkillCorner (0.418 against 0.419), so not adopted. Transitions and scale learned from DFL alone:
++0.007 on DFL, −0.012 on Metrica, a tie on the reserved matches and a loss on SkillCorner (0.417),
+so not adopted. The momentary touch itself (as opposed
+to the last touch) gave no gain once `lasttouch` was in. "Gap context" (where the ball was lost and where it
+reappears) separates dead from live play well (57% of dead frames are "lost at a
 line, back at a restart place" against 6% of live ones) but adds nothing measurable once `still`
 and the existing ball features are in (+0.0005).
 
@@ -360,11 +369,19 @@ frames were compared, and ±6 had the higher DFL mean. With all six profiles:
 |---|---|---|---|---|
 | A: first model | 0.572 | 0.278 | 0.674 | 0.312 |
 | K: frame-to-frame speeds | 0.650 | 0.441 | 0.772 | 0.482 |
-| **L: K with speeds over ±6 frames (submitted)** | **0.658** | **0.455** | **0.804** | **0.495** |
+| L: K with speeds over ±6 frames | **0.658** | 0.455 | 0.804 | 0.495 |
+| **P: L with the ball-track correction (submitted)** | 0.654 | **0.462** | **0.812** | **0.508** |
 
 Under `full`, L scores 0.455 against 0.346 for K; under the other profiles it is within 0.011 of
 K (lower by 0.001-0.010). It is higher than K on all five DFL development matches, on all three
 Metrica games and on both reserved matches (0.503 and 0.487 against 0.495 and 0.469).
+
+The ball-track correction (P) was tested last, on the same benchmark: better than L on all five
+DFL development matches (+0.003 to +0.011), within 0.012 of L on the Metrica games (−0.005 on
+average), and better on both reserved matches (0.517 and 0.500 against 0.503 and 0.487). Its
+gain comes mostly from the `short` gap profile (0.487 against 0.445); under the other five
+profiles it is within ±0.006 of L. On the competition match the run log reports how many ball
+frames it changed.
 
 **A second held-out split.** Retraining on Metrica and the other five DFL matches and holding out
 J03WN1 and J03WR9 instead gives the same picture: L scores 0.432 and 0.491 (all six profiles),
@@ -384,27 +401,30 @@ seven DFL matches: training on Metrica + DFL (better on 7 of 7) and the "gap con
 gain). The reserved matches were therefore not untouched by every decision, but none of the
 features of models F and I had been run on them before the final check. They were used again,
 for the restart kick (a tie, +0.0003, which the rule accepts as "not reversed") and for the speed
-chord (+0.008 and +0.018), each time after the change had passed on the development matches.
+chord (+0.008 and +0.018) and for the ball-track correction (+0.014 and +0.013), each time after the change had passed on the development matches.
 Repeated looks weaken them as an untouched test; the second split above is a further check.
 
-**Scale curve with all ten matches** (mean spellF1): 0.40 at scale 2, 0.55 at 4, 0.564 at 6,
-**0.569 at 8**, 0.561 at 10, 0.524 at 16. It is flat around the optimum, so a moderately wrong
+**Real tracker failures (SkillCorner).** As a further check on data used for no decision, the
+model was trained exactly as shipped and applied to the 20 matches of SkillCorner's open
+broadcast tracking (A-League 2024/25, MIT licence): tracking from TV broadcast video, where off-
+screen players are not detected (about 9 of 22 visible per frame) and the ball is detected on about
+60% of frames. Only detected objects were kept. SkillCorner names the team in possession or none,
+so it tests who has the ball, not dead ball. Where SkillCorner names a team, the model agrees
+80.7% of the time and calls the ball dead on 2.9% of those frames (`scripts/test_skillcorner.py`;
+spellF1 0.419 with SkillCorner's unlabelled frames ungraded). L and P score the same there
+(0.4190 and 0.4189).
+
+**Scale curve with all ten matches** (mean spellF1): 0.41 at scale 2, 0.55 at 4, 0.568 at 6,
+**0.570 at 8**, 0.562 at 10, 0.526 at 16. It is flat around the optimum, so a moderately wrong
 scale costs little.
 
 These scores show transfer between matches; they do not predict the competition score, which
 depends on that match's tracking and its own ground truth.
 
-**Full match.** The submitted file has 466 possessions (mean 8.6 s) and 144 stoppages, with
-frames H 57,569 / A 42,407 / D 58,881 / X 40,462 (37.1% of graded frames dead: 37.1% in the first
-half, 37.0% in the second). Broadcast fusion accepted 110 of 160 camera shots and filled 4,763
-tactical frames without a ball (ball check: 0.76 m median). The after-goal rule found the goal
-moment for three of the four goal tags (each from the ball lost in the penalty area for good; one
-paired with its kickoff by time order) and made 8,344 frames dead between those goals and their
-kickoffs; the fourth tag had no matching kickoff and ball event, and nothing was forced for it.
-Label-free checks, computed without any ground truth: the ball is missing on 84.1% of the frames
-labelled dead against 10.4% of those labelled live, the last-touch feature is known on 49.9% of
-graded frames and the team-shape model on 94.9%. These figures are printed by `run.py` and stored
-in `submission/YamineLamal_report.json`.
+**Full match.** `run.py` prints the output's possession and stoppage counts, how many ball
+frames the correction changed, how the after-goal rule found each goal, and label-free checks
+(ball-missing shares in live and dead output, dead share per half, coverage of the last-touch and
+team-shape features), and stores them in `submission/YamineLamal_report.json`.
 
 **Reproducibility.** The pipeline has no randomness: two runs of `run.py` on the same data give
 the identical file. On this match, two runs in separate installations gave the same figures
@@ -437,7 +457,8 @@ the same platform.
   levels, the one-observation-per-second cap, the set-piece quarters, the 2 m control radius and
   the broadcast thresholds, the touch, still-ball and kick thresholds, the restart places, the
 goal and penalty-area geometry, 3-second gap and 3-minute bound of the after-goal rule and the
-maximum player and ball speeds. The speed chord (±6 frames) was chosen on the external benchmark. Some were
+maximum player and ball speeds, and the 5 m, 1 s and 45 m/s thresholds of the ball-track
+correction. The speed chord (±6 frames) was chosen on the external benchmark. Some were
 written down while working on this project. None was chosen
   by scoring against any competition data.
 
@@ -446,6 +467,7 @@ written down while working on this project. None was chosen
 | dataset | used for | source and labelling | size |
 |---|---|---|---|
 | **Metrica Sports sample games 1-3** | training and tuning | public, https://github.com/metrica-sports/sample-data. Tracking by Metrica; event data collected manually by Metrica; our possession labels derived from those events by code | 3 matches, ~430,000 frames |
+| **SkillCorner open data** | test only (Section 6) | public, https://github.com/SkillCorner/opendata (MIT licence); broadcast tracking of 20 A-League 2024/25 matches with SkillCorner's per-frame team in possession; credited to SkillCorner as its README asks; not used for training or tuning | 20 matches, ~1,200,000 frames at 10 fps |
 | **DFL open data (IDSSE)** | training, tuning and the benchmark | Bassek, M., Rein, R., Weber, H., Memmert, D. (2025). An integrated dataset of spatiotemporal and event data in elite soccer. *Scientific Data* 12, 195. doi:10.1038/s41597-025-04505-y. Data © Deutsche Fußball Liga, CC BY 4.0, https://doi.org/10.6084/m9.figshare.28196177. Labels are the tracking's own ball status and possession; the event files are not used | 7 matches, ~1,000,000 frames |
 
 The Metrica sample repository has no formal licence file; its README provides the data for the
@@ -458,8 +480,9 @@ source.
 
 * **Domain gap.** The external matches come from other trackers and leagues; the competition
   tracking is automatic, fragmented and noisier. The DFL gaps are simulated, not real tracker
-  failures. The evidence cap, the six benchmark profiles (including fragmented, noisy tracks), the
-  noise-robust speeds and the flat scale curve limit the risk, but
+  failures, though the SkillCorner check uses real broadcast-tracking failures. The evidence cap,
+  the six benchmark profiles (including fragmented, noisy tracks), the noise-robust speeds, the
+  ball-track correction and the flat scale curve limit the risk, but
   frozen tables cannot adapt to this match's noise.
 * **Label conventions.** DFL's tracking-based labels follow the same definition as the ground
   truth, but each provider applies it its own way, and the Metrica labels are event-derived. The
@@ -499,5 +522,7 @@ docker run --rm -v "$PWD/data:/app/data:ro" -v "$PWD/submission:/app/submission"
 git clone https://github.com/metrica-sports/sample-data external/metrica-sample-data
 python scripts/download_dfl.py                 # DFL open data, ~2.6 GB
 python scripts/train_external.py               # rewrites models/external_params.json
-python scripts/benchmark.py                    # held-out results of Section 6
+python scripts/benchmark.py --correct          # held-out results of Section 6 (with the correction)
+python scripts/download_skillcorner.py         # optional: SkillCorner open data (MIT), ~1.8 GB
+python scripts/test_skillcorner.py             # optional: the real-tracking check of Section 6
 ```

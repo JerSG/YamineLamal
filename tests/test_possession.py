@@ -325,6 +325,26 @@ def test_dead_from_the_goal_until_its_kickoff():
     assert not ST.goal_dead_mask(ev[:1] + late, 20000, [(0, 20000)]).any()
 
 
+def test_ball_correction_removes_glitches_and_fills_short_gaps_only():
+    from possession.correct import correct_ball, GAP_MAX_FRAMES
+    pitch = (105.0, 68.0)
+    T = 200
+    ball = np.full((T, 3), np.nan, dtype=np.float32)
+    ball[:, 0] = (50 + np.arange(T) * 0.2) / 105            # rolling at 5 m/s
+    ball[:, 1] = 0.5
+    ball[40] = (0.9, 0.9, 0)                                 # a one-frame glitch
+    ball[60:70] = np.nan                                     # a 0.4 s gap
+    ball[100:100 + GAP_MAX_FRAMES + 10] = np.nan             # a gap too long to fill
+    c = correct_ball(ball, pitch)
+    assert np.allclose(c[40, 0], ball[39, 0] + 0.2 / 105, atol=1e-5)
+    assert np.isfinite(c[60:70, 0]).all() and np.allclose(c[65, 0], (50 + 65 * 0.2) / 105, atol=1e-5)
+    assert np.isnan(c[100:100 + GAP_MAX_FRAMES + 10, 0]).all()
+    impossible = ball.copy()
+    impossible[60:70] = np.nan
+    impossible[70:, 0] += 0.5                                 # 52 m in 0.44 s: not a real flight
+    assert np.isnan(correct_ball(impossible, pitch)[60:70, 0]).all()
+
+
 def test_viewer_page_round_trips_tracking_and_labels():
     """The replay page embeds subsampled, quantised tracking and run-length labels, and nothing
     else is needed to open it."""

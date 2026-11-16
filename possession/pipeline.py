@@ -139,11 +139,15 @@ def run_strict(out_path=None, report_path=None, verbose=True, data_dir=None, use
     info["frames_forced_dead"] = int(forced.sum())
     info["frames_dead_after_goals"] = getattr(model, "frames_dead_after_goals", 0)
     info["goal_moments_found_by"] = getattr(model, "goal_moment_sources", [])
+    info["ball_corrections"] = getattr(model, "ball_corrections", None)
     info["external_scale"] = params["scale"]
     info["checks"] = label_free_checks(labels, ball, model, halves)
     if verbose:
         print("output: {possessions} possessions (mean {mean_possession_s:.1f} s), "
               "{stoppages} stoppages; frames H {H} A {A} D {D}".format(**stats))
+        if info["ball_corrections"]:
+            print("ball track corrected: {glitches_removed} glitch frames removed, "
+                  "{gap_frames_filled} frames of short gaps filled".format(**info["ball_corrections"]))
         print("after-goal rule: {} frames dead from the goal to its kickoff; goal moments found by: "
               "{}".format(info["frames_dead_after_goals"],
                           ", ".join(info["goal_moments_found_by"]) or "no goal tags"))

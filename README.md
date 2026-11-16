@@ -26,7 +26,7 @@ Smart Tagging ──────────────────────
 ```
 
 On ten external matches, every change was kept only if it raised the held-out spellF1. On two DFL
-matches held back until the end, the submitted model scores **0.495** against **0.312** for our
+matches held back until the end, the submitted model scores **0.508** against **0.312** for our
 first model ([report, Section 6](docs/TECHNICAL_REPORT.md)).
 
 ## Reproduce the submission
@@ -104,7 +104,7 @@ The parameters can be regenerated from the public external data:
 git clone https://github.com/metrica-sports/sample-data external/metrica-sample-data
 python scripts/download_dfl.py       # DFL open data, ~2.6 GB, into external/dfl
 python scripts/train_external.py     # ~1 minute; rewrites models/external_params.json
-python scripts/benchmark.py          # held-out results on the external matches (~10 minutes)
+python scripts/benchmark.py --correct  # held-out results on the external matches (~10 minutes)
 ```
 
 None of them reads competition data.
@@ -142,6 +142,9 @@ byte. To compare two runs, `Get-FileHash submission\YamineLamal.csv` (Windows) o
   A half is dead before its kickoff tag opens, and the ball is dead from the moment a tagged goal
   goes in (seen in the goal, or lost in the box for good; else the goal tag's start) to the
   kickoff after it.
+* **Ball-track correction:** one-frame ball glitches are removed and ball gaps of up to a second
+  are bridged when the flight is physically possible (`possession/correct.py`), in training and on
+  the match alike. The run log reports how many frames it changed.
 * **Robust to tracking noise:** speeds are measured over half a second, so position jitter
   cannot pass for movement, and a track jumping to another object is ignored.
 * **Held-out results** (`scripts/benchmark.py`, mean spellF1; DFL under six tracking-problem
@@ -151,7 +154,7 @@ byte. To compare two runs, `Get-FileHash submission\YamineLamal.csv` (Windows) o
   | model | Metrica | DFL dev | DFL reserved |
   |---|---|---|---|
   | first model (Metrica only, five tracking features) | 0.572 | 0.278 | 0.312 |
-  | **submitted** | **0.658** | **0.455** | **0.495** |
+  | **submitted** | **0.654** | **0.462** | **0.508** |
 
   These show transfer between matches; they do not predict the competition score.
 
@@ -169,6 +172,8 @@ possession/
   broadcast.py                broadcast-to-tactical alignment and ball fill
   touch.py                    touches from ball-velocity changes; the last-touch feature
   shape.py                    team-shape model (antisymmetric logistic regression)
+  correct.py                  algorithmic correction of the ball track (glitches, short gaps)
+  skillcorner.py              SkillCorner open data reader (a real-tracking test set)
   deadball.py                 still ball and restart kick (and "gap context", not adopted)
   dfl.py                      DFL open data reader; labels from the tracking
   degrade.py                  tracking-gap profiles for the external benchmark
@@ -179,6 +184,8 @@ models/external_params.json   the frozen parameters (trained on external data)
 scripts/train_external.py     regenerates models/external_params.json from the external data
 scripts/download_dfl.py       downloads the DFL open data (CC BY 4.0)
 scripts/benchmark.py          held-out benchmark on the external matches
+scripts/test_skillcorner.py   real-tracking check on SkillCorner's 20 open matches
+scripts/download_skillcorner.py  downloads the SkillCorner open data (MIT)
 scripts/test_extensions.py    leave-one-game-out test of candidate extra features (external data)
 scripts/view_match.py         writes and opens the replay page (local only)
 scripts/make_banner.py        draws docs/assets/pitch.svg, the simulated README banner
@@ -209,7 +216,8 @@ data/, external/, submission/ match data, external data, generated output: all g
 `evaluation/` and `games.py` are the organisers' files, unchanged, under their MIT licence
 (`LICENSE-organisers`). The rest of the code is the team's own. Neither the match data nor the
 external data is covered by the organisers' licence. Metrica's sample data is acknowledged above.
-The DFL open data is © Deutsche Fußball Liga, CC BY 4.0
+SkillCorner's open data (MIT licence, https://github.com/SkillCorner/opendata) is used as a test set
+only and credited to SkillCorner. The DFL open data is © Deutsche Fußball Liga, CC BY 4.0
 (https://doi.org/10.6084/m9.figshare.28196177), described in Bassek, M., Rein, R., Weber, H.,
 Memmert, D. (2025), *An integrated dataset of spatiotemporal and event data in elite soccer*,
 Scientific Data 12, 195, doi:10.1038/s41597-025-04505-y. Neither dataset is redistributed here.

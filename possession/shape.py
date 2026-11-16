@@ -152,3 +152,90 @@ def shape_feature(o, state):
     init_dead = {"home_strong": 0.15, "home": 0.20, "even": 0.30, "away": 0.20,
                  "away_strong": 0.15}
     return [Feature("shape", values, codes, init_team, init_dead, neutral=("unknown",))]
+
+
+# ------------------------------------------------------------------------------------------------
+# a second model for frames without a ball
+# ------------------------------------------------------------------------------------------------
+# Where the ball is not seen, the team shape is not the only clue: where the ball was last seen
+# and which team last touched it still say a lot, and less the longer ago that was. The no-ball
+# model adds four columns to the 25 shape columns, each changing sign when the teams are
+# exchanged: the last-seen ball position along the home team's attacking direction (-0.5 own
+# goal .. +0.5 opponent's goal), the last touching team (+1 home, -1 away, 0 contested or none),
+# and both multiplied by exp(-seconds since the ball was last seen / NOBALL_DECAY_S). It is
+# fitted on live frames without a ball only, and applies only there (neutral elsewhere).
+NOBALL_DECAY_S = 5.0
+NOBALL_SUBSAMPLE = 2
+
+
+def noball_columns(o):
+    if "_noball_X" in o:
+        return o["_noball_X"]
+    from . import touch
+    pitch = o.get("pitch") or C.STRICT_EXTERNAL_PITCH
+    g, t = o["game"], o["summary"]
+    n = len(t["ball_seen"])
+    px = g["players"][..., 0].astype(np.float64) * pitch[0]
+    right = _attacks_right(px, np.asarray(g["slot_team"]), o["blocks"], n)
+    seen = t["ball_seen"]
+    bx = t["bx"] / pitch[0]
+    pos = np.where(right, bx - 0.5, 0.5 - bx)                   # home attacking direction
+    tc = touch.touches(o)
+    sign = np.where(tc == 0, 1.0, np.where(tc == 1, -1.0, np.where(tc == 2, 0.0, np.nan)))
+    lbx = np.full(n, np.nan)
+    lt = np.full(n, np.nan)
+    age = np.full(n, np.nan)
+    for s, e in o["blocks"]:
+        last_pos, last_t, last_seen = np.nan, 0.0, None
+        for i in range(s, e):                                    # one pass per block
+            if seen[i]:
+                last_pos, last_seen = pos[i], i
+            if np.isfinite(sign[i]):
+                last_t = sign[i]
+            lbx[i] = last_pos
+            lt[i] = last_t
+            age[i] = (i - last_seen) / C.FPS if last_seen is not None else np.nan
+    w = np.exp(-age / NOBALL_DECAY_S)
+    extra = np.stack([lbx, lt, lbx * w, lt * w], axis=1)
+    X = np.concatenate([design(o), extra], axis=1)
+    o["_noball_X"] = X
+    return X
+
+
+def fit_noball(train):
+    Xs, ys = [], []
+    for o in train:
+        X = noball_columns(o)
+        lab = o["labels"]
+        ok = np.isfinite(X).all(axis=1) & ((lab == 0) | (lab == 1)) & ~o["summary"]["ball_seen"]
+        idx = np.flatnonzero(ok)[::NOBALL_SUBSAMPLE]
+        Xs.append(X[idx])
+        ys.append((lab[idx] == 0).astype(float))
+    X = np.concatenate(Xs)
+    y = np.concatenate(ys)
+    scale = np.sqrt((X ** 2).mean(axis=0)) + 1e-9
+    w = _logistic(X / scale, y, L2 * len(y) / 1e4)
+    acc = float(np.mean(((X / scale) @ w > 0) == (y > 0.5)))
+    return {"w": w, "scale": scale, "train_accuracy": acc}
+
+
+def noball_feature(o, state):
+    X = noball_columns(o)
+    z = (X / state["scale"]) @ state["w"]
+    z[~np.isfinite(X).all(axis=1) | o["summary"]["ball_seen"]] = np.nan
+    values = ["home_strong", "home", "even", "away", "away_strong", "unknown"]
+    codes = 4 - np.searchsorted(np.asarray(LOGIT_EDGES), np.nan_to_num(z), side="right")
+    codes = np.where(np.isfinite(z), codes, 5).astype(np.int16)
+    init_team = {"home_strong": 0.30, "home": 0.25, "even": 0.20, "away": 0.15,
+                 "away_strong": 0.10}
+    init_dead = {"home_strong": 0.15, "home": 0.20, "even": 0.30, "away": 0.20,
+                 "away_strong": 0.15}
+    return [Feature("noball", values, codes, init_team, init_dead, neutral=("unknown",))]
+
+
+def shape_seen_feature(o, state):
+    """The shape feature on frames with a ball only (for use together with noball_feature)."""
+    f = shape_feature(o, state)[0]
+    codes = np.where(o["summary"]["ball_seen"], f.codes, len(f.values) - 1).astype(np.int16)
+    return [Feature("shape", f.values, codes, dict(zip(f.values, f.init_team)),
+                    dict(zip(f.values, f.init_dead)), neutral=("unknown",))]

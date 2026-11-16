@@ -327,8 +327,11 @@ def train(games, labels_list, source, verbose=True):
     """Fit the team-shape model, the emission tables and the transitions on the external games,
     and tune the evidence scale on them. Held-out evaluation is scripts/benchmark.py."""
     from . import shape
-    obs = [make_obs(g["players"], g["ball"], g["slot_team"], C.STRICT_EXTERNAL_PITCH,
-                    blocks_from_labels(lab), labels=lab) for g, lab in zip(games, labels_list)]
+    from .correct import correct_ball
+    obs = [make_obs(g["players"],
+                    correct_ball(g["ball"], C.STRICT_EXTERNAL_PITCH, blocks_from_labels(lab)),
+                    g["slot_team"], C.STRICT_EXTERNAL_PITCH, blocks_from_labels(lab), labels=lab)
+           for g, lab in zip(games, labels_list)]
     bins = derive_bins([o["summary"] for o in obs], labels_list)
     if verbose:
         print("feature bins from the external games: {}".format(bins))
@@ -360,6 +363,7 @@ def train(games, labels_list, source, verbose=True):
         "features": {n: {"values": f.values, "table": t.tolist()}
                      for n, f, t in zip(MODEL_FEATURES, feats[0], tables)},
         "speed_chord_frames": C.SPEED_CHORD_FRAMES,
+        "ball_correction": True,
         "transitions": trans.tolist(),
         "transition_stats": tstats,
         "scale": scale,
@@ -506,6 +510,14 @@ def apply(params, players, ball, slot_team, events, n_frames, blocks, pitch):
     """Labels H/A/D per frame (codes 0/1/2; -1 outside blocks) with the frozen parameters."""
     sm = params["shape_model"]
     shape_state = {"w": np.array(sm["weights"]), "scale": np.array(sm["column_scale"])}
+    corrections = None
+    if params.get("ball_correction"):
+        from .correct import correct_ball
+        before = np.isfinite(ball[:, 0])
+        ball = correct_ball(ball, pitch, blocks)
+        after = np.isfinite(ball[:, 0])
+        corrections = {"glitches_removed": int((before & ~after).sum()),
+                       "gap_frames_filled": int((~before & after).sum())}
     saved_chord = C.SPEED_CHORD_FRAMES
     C.SPEED_CHORD_FRAMES = params.get("speed_chord_frames", 0)
     try:
@@ -526,6 +538,7 @@ def apply(params, players, ball, slot_team, events, n_frames, blocks, pitch):
     allowed[after_goal, 0] = allowed[after_goal, 1] = False
     forced = forced | after_goal
     model.frames_dead_after_goals = int(after_goal.sum())
+    model.ball_corrections = corrections
     found = goal_moments(events, ball, pitch, n_frames)
     n_goals = sum(1 for e in events if e["code"] == "GOALS")
     model.goal_moment_sources = [how for _, _, _, how in found] + \

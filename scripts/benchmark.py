@@ -57,6 +57,17 @@ CONFIGS = {
                              "extras": ("lasttouch", "shape", "gapctx", "still")},
     "K I + restart kick": {"train": ("metrica", "dfl"),
                            "extras": ("lasttouch", "shape", "still", "restart")},
+    "N K, DFL transitions + scale": {"train": ("metrica", "dfl"),
+                                     "extras": ("lasttouch", "shape", "still", "restart"),
+                                     "trans_sets": ("dfl",), "scale_sets": ("dfl",)},
+    "N2 K, DFL transitions": {"train": ("metrica", "dfl"),
+                              "extras": ("lasttouch", "shape", "still", "restart"),
+                              "trans_sets": ("dfl",)},
+    "M1 K + noball": {"train": ("metrica", "dfl"),
+                      "extras": ("lasttouch", "shape", "still", "restart", "noball")},
+    "M2 K, shape|ball + noball": {"train": ("metrica", "dfl"),
+                                  "extras": ("lasttouch", "shape_seen", "still", "restart",
+                                             "noball")},
 }
 
 
@@ -76,7 +87,9 @@ def _extras():
                              lambda o, st: [deadball.restart_feature(o["summary"])]),
             "touch": Extra(touch.fit, touch.touch_feature),
             "lasttouch": Extra(touch.fit, touch.lasttouch_feature),
-            "shape": Extra(shape.fit, shape.shape_feature)}
+            "shape": Extra(shape.fit, shape.shape_feature),
+            "shape_seen": Extra(shape.fit, shape.shape_seen_feature),
+            "noball": Extra(shape.fit_noball, shape.noball_feature)}
 
 
 EXTRAS = _extras()
@@ -88,7 +101,13 @@ def load_dfl(cache_dir):
     return dfl.load_all(os.path.join(ROOT, "external", "dfl"), cache_dir)
 
 
+CORRECT = False          # --correct: repair the ball track (possession/correct.py) first
+
+
 def obs_entry(game, labels):
+    if CORRECT:
+        from possession.correct import correct_ball
+        game = dict(game, ball=correct_ball(game["ball"], PITCH, ST.blocks_from_labels(labels)))
     s = ST.summarise(game["players"], game["ball"], game["slot_team"], PITCH)
     return {"game": game, "labels": labels, "summary": s,
             "blocks": ST.blocks_from_labels(labels)}
@@ -125,14 +144,19 @@ def features(o, bins, extras, states):
     return f
 
 
-def fit(train, extras):
+def fit(train, extras, sets=None, trans_sets=None, scale_sets=None):
+    """sets: the dataset of each training observation; trans_sets / scale_sets: learn the
+    transitions / tune the scale on those datasets only (default: all training games)."""
     bins = ST.derive_bins([o["summary"] for o in train], [o["labels"] for o in train])
     states = {n: EXTRAS[n].fit(train) for n in extras}
     feats = [features(o, bins, extras, states) for o in train]
     labs = [o["labels"] for o in train]
     tables = ST.fit_tables(feats, labs)
-    trans, _ = ST.fit_transitions(labs)
-    scale, _ = ST.tune_scale(feats, labs, tables, trans)
+    pick = lambda which: [k for k in range(len(train))                       # noqa: E731
+                          if which is None or sets is None or sets[k] in which]
+    tk, sk = pick(trans_sets), pick(scale_sets)
+    trans, _ = ST.fit_transitions([labs[k] for k in tk])
+    scale, _ = ST.tune_scale([feats[k] for k in sk], [labs[k] for k in sk], tables, trans)
     return bins, states, tables, trans, scale
 
 
@@ -145,7 +169,9 @@ def run_job(job):
     else:
         pool = [g for k, g in enumerate(G) if k != i and not g["reserved"]
                 and g["set"] in spec["train"]]
-    bins, states, tables, trans, scale = fit([g["train"] for g in pool], spec["extras"])
+    bins, states, tables, trans, scale = fit([g["train"] for g in pool], spec["extras"],
+                                             [g["set"] for g in pool], spec.get("trans_sets"),
+                                             spec.get("scale_sets"))
     rows = []
     for (prof, seed), o in sorted(test_game["test"].items()):
         f = features(o, bins, spec["extras"], states)
@@ -195,6 +221,8 @@ def main():
     ap.add_argument("--cache", default=os.path.join(ROOT, "external", "cache"),
                     help="where parsed DFL matches are cached (gitignored)")
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--correct", action="store_true",
+                    help="repair the ball track before the features (possession/correct.py)")
     ap.add_argument("--speed-chord", type=int, default=None,
                     help="override config.SPEED_CHORD_FRAMES for every configuration")
     ap.add_argument("--reserved", nargs="*", default=list(RESERVED),
@@ -203,6 +231,8 @@ def main():
     a = ap.parse_args()
     if a.speed_chord is not None:
         C.SPEED_CHORD_FRAMES = a.speed_chord
+    global CORRECT
+    CORRECT = a.correct
     os.makedirs(a.cache, exist_ok=True)
     t0 = time.time()
     G = prepare(a.cache, a.final, tuple(a.reserved))
