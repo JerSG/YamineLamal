@@ -44,9 +44,10 @@ Main components:
   confirmed on two DFL matches held back from all development. There it scores **0.508**
   against **0.312** for our first model (trained on Metrica only, five tracking features).
 
-There is no competition score to report: the ground truth is private. The final file was scored
-once on the public 5-minute window, after the model was frozen, only to check that the pipeline is
-correct; nothing was changed afterwards (Section 7).
+There is no competition score to report: the ground truth is private. The file of the model
+before its last step (the ball-track correction, chosen on external data) was scored once on the
+public 5-minute window, only to check that the pipeline is correct; nothing was changed because of
+it (Section 7).
 
 # 2. Why this approach
 
@@ -299,14 +300,18 @@ its strength setting changing between folds (0.10 and 0.20). The +0.017 mean is 
 of a three-game test, and the classifier has no cap on evidence for tracking noisier than its
 training data, so it was not adopted.
 
-On the benchmark of Section 6, four more were rejected. A separate team-shape model for frames
+On the benchmark of Section 6, five more were rejected. A separate team-shape model for frames
 without a ball, adding where the ball was last seen and which team last touched it (89% right on
 those frames on a held-out Metrica game, against 38% for the shape model alone): +0.006 on the DFL
 development matches but −0.008 on Metrica, a tie on the reserved matches and a loss on
 SkillCorner (0.418 against 0.419), so not adopted. Transitions and scale learned from DFL alone:
 +0.007 on DFL, −0.012 on Metrica, a tie on the reserved matches and a loss on SkillCorner (0.417),
 so not adopted. The momentary touch itself (as opposed
-to the last touch) gave no gain once `lasttouch` was in. "Gap context" (where the ball was lost and where it
+to the last touch) gave no gain once `lasttouch` was in. A "slowdown" feature, the change in mean player speed between the next and the previous two
+seconds (a whistle makes everyone slow down together), raised DFL macroF1 from 0.812 to 0.823 by
+catching more dead-ball frames, but lowered spellF1 from 0.462 to 0.459 (worse on four of five
+development matches), because teams slowing down in possession looked like stoppages; not
+adopted. "Gap context" (where the ball was lost and where it
 reappears) separates dead from live play well (57% of dead frames are "lost at a
 line, back at a restart place" against 6% of live ones) but adds nothing measurable once `still`
 and the existing ball features are in (+0.0005).
@@ -421,10 +426,18 @@ scale costs little.
 These scores show transfer between matches; they do not predict the competition score, which
 depends on that match's tracking and its own ground truth.
 
-**Full match.** `run.py` prints the output's possession and stoppage counts, how many ball
-frames the correction changed, how the after-goal rule found each goal, and label-free checks
-(ball-missing shares in live and dead output, dead share per half, coverage of the last-touch and
-team-shape features), and stores them in `submission/YamineLamal_report.json`.
+**Full match.** The submitted file has 468 possessions (mean 8.5 s) and 145 stoppages, with
+frames H 57,549 / A 42,376 / D 58,932 / X 40,462 (37.1% of graded frames dead: 37.2% in the first
+half, 37.0% in the second). Broadcast fusion accepted 110 of 160 camera shots and filled 4,763
+tactical frames without a ball (ball check: 0.76 m median). The ball-track correction removed 13
+glitch frames and filled 45 frames of short gaps, a small change, as expected from a ball track
+with few short gaps. The after-goal rule found the goal moment for three of the four goal tags
+(each from the ball lost in the penalty area for good; one paired with its kickoff by time order)
+and made 8,344 frames dead between those goals and their kickoffs; the fourth tag had no matching
+kickoff and ball event, and nothing was forced for it. Label-free checks, computed without any
+ground truth: the ball is missing on 84.0% of the frames labelled dead against 10.4% of those
+labelled live, the last-touch feature is known on 49.9% of graded frames and the team-shape model
+on 94.9%. These figures are printed by `run.py` and stored in `submission/YamineLamal_report.json`.
 
 **Reproducibility.** The pipeline has no randomness: two runs of `run.py` on the same data give
 the identical file. On this match, two runs in separate installations gave the same figures
@@ -439,11 +452,13 @@ the same platform.
   in advance.
 * **Ground truth:** none of the model's parameters, rules or choices comes from the public
   5-minute window. Early in development we looked at its segments to understand what counts as
-  possession and used it as a smoke test of early versions of the pipeline. The final file was
-  scored on it once, after everything was frozen, as the organisers intend: to check that frames
+  possession and used it as a smoke test of early versions of the pipeline. The file of the model
+  just before its last step was scored on it once, as the organisers intend: to check that frames
   are aligned and labels mean what we think (spellF1 0.579, macroF1 0.699; home share 57.4%
   against 57.3%, so home and away are not swapped). With 17 possessions this says little about
-  the full match, and nothing was changed afterwards.
+  the full match. Nothing was changed because of it: the later steps (the ball-track correction,
+  and the rejected slowdown feature below) were proposed from general football knowledge and
+  decided on external data only, and the submitted file was not scored on the public window.
 * **The after-goal rule** (4.5) was added after we saw, in the replay of our own output, labels of
   possession during goal celebrations, including just after the ball went in. Inspecting the data
   to debug the pipeline is allowed; the fix is a general rule of the game, the same for every

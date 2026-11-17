@@ -141,3 +141,49 @@ def restart_feature(t):
     init_dead = {"kick_home": 0.005, "kick_away": 0.005, "kick_unclear": 0.005, "none": 0.985}
     return Feature("restart", values, codes.astype(np.int16), init_team, init_dead,
                    neutral=("unknown",))
+
+
+SLOW_WINDOW_FRAMES = 50      # compare the next 2 s of player speed with the previous 2 s
+SLOW_GAP_FRAMES = 12         # leaving out the half second around the frame itself
+SLOW_QUANTILES = (15, 35, 65, 85)
+
+
+def speed_change(t):
+    """Mean player speed over the next SLOW_WINDOW_FRAMES minus over the previous ones (m/s),
+    skipping SLOW_GAP_FRAMES around the frame: strongly negative when the players slow down
+    together (a whistle), strongly positive when they speed up (a restart)."""
+    v = np.asarray(t["mean_speed"], dtype=np.float64)
+    n = len(v)
+    ok = np.isfinite(v)
+    cs = np.concatenate(([0.0], np.cumsum(np.where(ok, v, 0.0))))
+    cn = np.concatenate(([0], np.cumsum(ok)))
+
+    def mean(lo, hi):
+        lo, hi = np.clip(lo, 0, n), np.clip(hi, 0, n)
+        k = cn[hi] - cn[lo]
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return np.where(k > SLOW_WINDOW_FRAMES // 2, (cs[hi] - cs[lo]) / np.maximum(k, 1), np.nan)
+    i = np.arange(n)
+    after = mean(i + SLOW_GAP_FRAMES, i + SLOW_GAP_FRAMES + SLOW_WINDOW_FRAMES)
+    before = mean(i - SLOW_GAP_FRAMES - SLOW_WINDOW_FRAMES, i - SLOW_GAP_FRAMES)
+    return after - before
+
+
+def fit_slowdown(train):
+    """Bin edges: quantiles of the speed change over the external training games."""
+    x = np.concatenate([speed_change(o["summary"]) for o in train])
+    x = x[np.isfinite(x)]
+    return {"edges": tuple(float(e) for e in np.percentile(x, SLOW_QUANTILES))}
+
+
+def slowdown_feature(t, state):
+    d = speed_change(t)
+    values = ["slowing_hard", "slowing", "steady", "speeding", "speeding_hard", "unknown"]
+    codes = np.searchsorted(np.asarray(state["edges"]), np.nan_to_num(d), side="right")
+    codes = np.where(np.isfinite(d), codes, 5).astype(np.int16)
+    init_team = {"slowing_hard": 0.10, "slowing": 0.20, "steady": 0.35, "speeding": 0.20,
+                 "speeding_hard": 0.15}
+    init_dead = {"slowing_hard": 0.25, "slowing": 0.20, "steady": 0.25, "speeding": 0.15,
+                 "speeding_hard": 0.15}
+    return Feature("slowdown", values, codes, init_team, init_dead, team_bearing=False,
+                   neutral=("unknown",))

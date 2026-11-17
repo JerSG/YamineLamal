@@ -206,8 +206,8 @@ data/, external/, submission/ match data, external data, generated output: all g
 * **The competition data is used as input only:** tracking, Smart Tagging and broadcast tracking.
   The videos are not used.
 * **No ground truth.** No parameter was fitted, calibrated or chosen on the public ground truth.
-  The final file was scored on it once, after freezing, only as the pipeline check the organisers
-  intend; nothing was changed afterwards.
+  The model's file just before its last step was scored on it once, only as the pipeline check
+  the organisers intend; nothing was changed because of it.
 * **No hand labels or manual data** on the provided game.
 * **No match data in this repository.** `data/`, `external/` and `submission/` are gitignored.
 
